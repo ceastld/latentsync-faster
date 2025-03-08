@@ -1,0 +1,28 @@
+accelerate==1.4.0
+decord==0.6.0
+diffusers==0.32.2
+einops==0.8.1
+face_alignment==1.4.1
+ffmpeg_python==0.2.0
+imageio==2.37.0
+librosa==0.10.2.post1
+lws==1.2.8
+matplotlib==3.10.1
+mediapipe==0.10.21
+more_itertools==10.6.0
+numpy==2.1.0
+omegaconf==2.3.0
+onnxruntime==1.20.1
+opencv_contrib_python==4.11.0.86
+opencv_python==4.11.0.86
+packaging==24.2
+Pillow==11.1.0
+regex==2024.11.6
+scipy==1.15.2
+soundfile==0.13.1
+tensorrt==10.8.0.43
+# torch==2.6.0+cu124
+# torchvision==0.21.0+cu124
+tqdm==4.67.1
+transformers==4.49.0
+xformers==0.0.29.post3

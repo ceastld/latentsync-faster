@@ -1,0 +1,349 @@
+import os
+import time
+import numpy as np
+import cv2
+import torch
+import onnxruntime as ort
+from typing import List, Optional, Tuple, Union
+
+from .utils.box_utils import hard_nms
+from .utils.bbox import BBox
+
+class FaceLandmarkDetector:
+    """统一的人脸关键点检测接口"""
+    
+    def __init__(self, 
+                 device: str = "cpu", 
+                 detector_type: str = "onnx",
+                 face_detector_path: Optional[str] = None,
+                 landmark_detector_path: Optional[str] = None,
+                 enable_timing: bool = False):
+        """
+        初始化人脸关键点检测器
+        
+        Args:
+            device: 设备，'cpu'或'cuda'
+            detector_type: 检测器类型，'onnx'、'face_alignment'或'mediapipe'
+            face_detector_path: 人脸检测器模型路径，如果为None则使用默认路径
+            landmark_detector_path: 关键点检测器模型路径，如果为None则使用默认路径
+            enable_timing: 是否启用时间测量
+        """
+        self.device = device
+        self.detector_type = detector_type
+        self.enable_timing = enable_timing
+        
+        # 设置默认模型路径
+        if face_detector_path is None:
+            face_detector_path = os.path.join(os.path.dirname(__file__), "models", "face_detector.onnx")
+        if landmark_detector_path is None:
+            landmark_detector_path = os.path.join(os.path.dirname(__file__), "models", "landmark_detector.onnx")
+        
+        self.face_detector_path = face_detector_path
+        self.landmark_detector_path = landmark_detector_path
+        
+        # 根据检测器类型初始化
+        if detector_type == "onnx":
+            self._init_onnx_detector()
+        elif detector_type == "face_alignment":
+            self._init_face_alignment()
+        elif detector_type == "mediapipe":
+            self._init_mediapipe()
+        else:
+            raise ValueError(f"不支持的检测器类型: {detector_type}")
+    
+    def _init_onnx_detector(self):
+        """初始化ONNX检测器"""
+        # 检查文件是否存在
+        if not os.path.exists(self.face_detector_path):
+            raise FileNotFoundError(f"人脸检测模型未找到: {self.face_detector_path}")
+        if not os.path.exists(self.landmark_detector_path):
+            raise FileNotFoundError(f"关键点检测模型未找到: {self.landmark_detector_path}")
+        
+        # 初始化ONNX运行时会话
+        self.face_detector = ort.InferenceSession(self.face_detector_path)
+        self.face_detector_input_name = self.face_detector.get_inputs()[0].name
+        
+        self.landmark_detector = ort.InferenceSession(self.landmark_detector_path)
+    
+    def _init_face_alignment(self):
+        """初始化face_alignment检测器"""
+        try:
+            import face_alignment
+            self.fa = face_alignment.FaceAlignment(
+                face_alignment.LandmarksType.TWO_D, 
+                flip_input=False, 
+                device=self.device
+            )
+        except ImportError:
+            raise ImportError("未安装face_alignment库，请使用pip install face-alignment安装")
+    
+    def _init_mediapipe(self):
+        """初始化MediaPipe检测器"""
+        try:
+            import mediapipe as mp
+            self.face_mesh = mp.solutions.face_mesh.FaceMesh(static_image_mode=True)
+        except ImportError:
+            raise ImportError("未安装mediapipe库，请使用pip install mediapipe安装")
+    
+    def detect_face(self, image: np.ndarray) -> Tuple[Optional[np.ndarray], float]:
+        """
+        检测图像中的人脸
+        
+        Args:
+            image: 输入图像
+            
+        Returns:
+            Tuple[Optional[np.ndarray], float]: 人脸边界框和检测时间
+        """
+        if self.detector_type == "onnx":
+            return self._detect_face_onnx(image)
+        elif self.detector_type == "face_alignment":
+            # face_alignment库不直接提供边界框，返回None
+            return None, 0.0
+        elif self.detector_type == "mediapipe":
+            # MediaPipe不直接提供边界框，返回None
+            return None, 0.0
+    
+    def _detect_face_onnx(self, image: np.ndarray) -> Tuple[Optional[np.ndarray], float]:
+        """使用ONNX模型检测人脸"""
+        orig_size = image.shape
+        
+        # 预处理图像
+        img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        img = cv2.resize(img, (320, 240))
+        img_mean = np.array([127, 127, 127])
+        img = (img - img_mean) / 128
+        img = np.transpose(img, [2, 0, 1])
+        img = np.expand_dims(img, axis=0)
+        img = img.astype(np.float32)
+        
+        # 运行检测器
+        start_time = time.time() if self.enable_timing else 0
+        confidences, boxes = self.face_detector.run(None, {self.face_detector_input_name: img})
+        face_detection_time = time.time() - start_time if self.enable_timing else 0
+        
+        # 获取边界框
+        boxes, labels, probs = self._predict_boxes(orig_size[1], orig_size[0], confidences, boxes, 0.7)
+        
+        if len(boxes) == 0:
+            return None, face_detection_time
+        
+        # 只取概率最高的人脸
+        max_idx = np.argmax(probs)
+        box = boxes[max_idx]
+        
+        return box, face_detection_time
+    
+    def _predict_boxes(self, width, height, confidences, boxes, prob_threshold=0.7, iou_threshold=0.3, top_k=-1):
+        """预测人脸边界框"""
+        boxes = boxes[0]
+        confidences = confidences[0]
+        picked_box_probs = []
+        picked_labels = []
+        for class_index in range(1, confidences.shape[1]):
+            probs = confidences[:, class_index]
+            mask = probs > prob_threshold
+            probs = probs[mask]
+            if probs.shape[0] == 0:
+                continue
+            subset_boxes = boxes[mask, :]
+            box_probs = np.concatenate([subset_boxes, probs.reshape(-1, 1)], axis=1)
+            box_probs = hard_nms(box_probs,
+                               iou_threshold=iou_threshold,
+                               top_k=top_k)
+            picked_box_probs.append(box_probs)
+            picked_labels.extend([class_index] * box_probs.shape[0])
+        if not picked_box_probs:
+            return np.array([]), np.array([]), np.array([])
+        picked_box_probs = np.concatenate(picked_box_probs)
+        picked_box_probs[:, 0] *= width
+        picked_box_probs[:, 1] *= height
+        picked_box_probs[:, 2] *= width
+        picked_box_probs[:, 3] *= height
+        return picked_box_probs[:, :4].astype(np.int32), np.array(picked_labels), picked_box_probs[:, 4]
+    
+    def get_landmarks(self, image: Union[np.ndarray, torch.Tensor]) -> Optional[List[np.ndarray]]:
+        """
+        获取图像中的面部关键点
+        
+        Args:
+            image: 输入图像，可以是NumPy数组或Tensor
+            
+        Returns:
+            Optional[List[np.ndarray]]: 包含每个检测到的人脸的关键点数组的列表，如果未检测到人脸则返回None
+        """
+        # 转换输入图像格式
+        if isinstance(image, torch.Tensor):
+            if image.dim() == 4 and image.shape[0] == 1:
+                # 如果是batch中的第一个图像
+                image = image[0]
+            # 将PyTorch张量转换为NumPy数组
+            if image.dim() == 3 and image.shape[0] == 3:
+                # CHW格式，转换为HWC
+                image = image.permute(1, 2, 0).cpu().numpy()
+            else:
+                image = image.cpu().numpy()
+            
+            # 将值范围从[-1, 1]或[0, 1]转换为[0, 255]
+            if image.max() <= 1.0:
+                image = (image * 255).astype(np.uint8)
+        
+        # 根据检测器类型获取关键点
+        if self.detector_type == "onnx":
+            return self._get_landmarks_onnx(image)
+        elif self.detector_type == "face_alignment":
+            return self._get_landmarks_face_alignment(image)
+        elif self.detector_type == "mediapipe":
+            return self._get_landmarks_mediapipe(image)
+    
+    def _get_landmarks_onnx(self, image: np.ndarray) -> Optional[List[np.ndarray]]:
+        """使用ONNX模型获取关键点"""
+        # 检测人脸
+        box, _ = self._detect_face_onnx(image)
+        if box is None:
+            if self.enable_timing:
+                print("未检测到人脸")
+            return None
+        
+        # 预处理关键点输入
+        start_time = time.time() if self.enable_timing else 0
+        face_input, bbox_info = self._preprocess_landmark_input(image, box)
+        preprocess_time = time.time() - start_time if self.enable_timing else 0
+        
+        # 运行关键点检测
+        landmark_start_time = time.time() if self.enable_timing else 0
+        face_input = face_input.astype(np.float32)
+        landmark_outputs = self.landmark_detector.run(None, {'input': face_input})
+        landmark_time = time.time() - landmark_start_time if self.enable_timing else 0
+        
+        # 处理关键点输出
+        landmarks = self._process_landmark_output(landmark_outputs[0], bbox_info)
+        
+        # 打印时间信息
+        if self.enable_timing:
+            total_time = preprocess_time + landmark_time
+            print(f"预处理: {preprocess_time:.4f}秒, 关键点检测: {landmark_time:.4f}秒, 总计: {total_time:.4f}秒")
+        
+        return [landmarks]
+    
+    def _preprocess_landmark_input(self, image: np.ndarray, box: np.ndarray) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
+        """预处理关键点检测的输入"""
+        x1, y1, x2, y2 = box
+        # 扩大边界框确保包含整个脸
+        w = x2 - x1
+        h = y2 - y1
+        size = int(max([w, h]) * 1.1)
+        cx = x1 + w//2
+        cy = y1 + h//2
+        x1 = cx - size//2
+        x2 = x1 + size
+        y1 = cy - size//2
+        y2 = y1 + size
+        
+        # 确保边界框在图像范围内
+        x1 = max(0, x1)
+        y1 = max(0, y1)
+        x2 = min(image.shape[1], x2)
+        y2 = min(image.shape[0], y2)
+        
+        # 裁剪和调整大小
+        face = image[y1:y2, x1:x2]
+        face = cv2.resize(face, (56, 56))
+        
+        # 转换为模型输入格式
+        face = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
+        face = face.astype(np.float32)
+        face = face / 255.0
+        face = (face - np.array([0.485, 0.456, 0.406])) / np.array([0.229, 0.224, 0.225])
+        face = np.transpose(face, (2, 0, 1))
+        face = np.expand_dims(face, axis=0)
+        
+        return face, (x1, y1, x2-x1, y2-y1)
+    
+    def _process_landmark_output(self, landmarks: np.ndarray, bbox_info: Tuple[int, int, int, int]) -> np.ndarray:
+        """处理关键点输出"""
+        x, y, w, h = bbox_info
+        landmarks = landmarks.reshape(-1, 2)
+        
+        # 将关键点从56x56的归一化坐标转换回原始图像坐标
+        landmarks[:, 0] = landmarks[:, 0] * w + x
+        landmarks[:, 1] = landmarks[:, 1] * h + y
+        
+        return landmarks
+    
+    def _get_landmarks_face_alignment(self, image: np.ndarray) -> Optional[List[np.ndarray]]:
+        """使用face_alignment获取关键点"""
+        try:
+            detected_faces = self.fa.get_landmarks(image)
+            if detected_faces is None:
+                if self.enable_timing:
+                    print("未检测到人脸")
+                return None
+            return detected_faces
+        except Exception as e:
+            if self.enable_timing:
+                print(f"face_alignment检测失败: {str(e)}")
+            return None
+    
+    def _get_landmarks_mediapipe(self, image: np.ndarray) -> Optional[List[np.ndarray]]:
+        """使用MediaPipe获取关键点"""
+        try:
+            results = self.face_mesh.process(image)
+            if not results.multi_face_landmarks:
+                if self.enable_timing:
+                    print("未检测到人脸")
+                return None
+            
+            height, width, _ = image.shape
+            landmarks_list = []
+            
+            for face_landmarks in results.multi_face_landmarks:
+                # 提取关键点坐标
+                landmark_coordinates = np.array([
+                    (landmark.x * width, landmark.y * height) 
+                    for landmark in face_landmarks.landmark
+                ])
+                
+                # 转换为68点格式
+                lm68 = self._mediapipe_to_68_points(landmark_coordinates)
+                landmarks_list.append(lm68)
+            
+            return landmarks_list
+        except Exception as e:
+            if self.enable_timing:
+                print(f"MediaPipe检测失败: {str(e)}")
+            return None
+    
+    def _mediapipe_to_68_points(self, lm478: np.ndarray) -> np.ndarray:
+        """将MediaPipe的478点转换为68点格式"""
+        # 这里实现MediaPipe关键点到68点格式的映射
+        # 简化版本，实际应根据具体需求实现
+        indices = [
+            # 轮廓点 (0-16)
+            162, 21, 54, 103, 67, 109, 10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361,
+            # 眉毛点 (17-26)
+            70, 63, 105, 66, 107, 336, 296, 334, 293, 300,
+            # 鼻子点 (27-35)
+            6, 168, 197, 195, 5, 4, 98, 97, 2,
+            # 眼睛点 (36-47)
+            33, 160, 158, 133, 153, 144, 362, 385, 387, 263, 373, 380,
+            # 嘴巴点 (48-67)
+            61, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146, 61
+        ]
+        
+        # 确保索引在有效范围内
+        valid_indices = [i for i in indices if i < len(lm478)]
+        if len(valid_indices) < 68:
+            # 如果没有足够的点，填充缺失的点
+            lm68 = np.zeros((68, 2), dtype=np.float32)
+            for i, idx in enumerate(valid_indices):
+                lm68[i] = lm478[idx]
+        else:
+            lm68 = np.array([lm478[i] for i in indices[:68]])
+        
+        return lm68
+    
+    def close(self):
+        """关闭检测器并释放资源"""
+        if self.detector_type == "mediapipe" and hasattr(self, 'face_mesh'):
+            self.face_mesh.close() 
