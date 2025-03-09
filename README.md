@@ -1,4 +1,6 @@
-Note: The dependencies are very confusing because of the application of the newest `diffusers` and `transformers`. But it is necessary for `torch.compile`. It can be run by installing every newest dependency seperately now. Later I will try to create a stable requirements file.
+03/08/25: The dependencies are very confusing because of the application of the newest `diffusers` and `transformers`. But it is necessary for `torch.compile`. It can be run by installing every newest dependency seperately now. Later I will try to create a stable requirements file.
+
+03/09/25: The correct requirements have been settled down. Just `sh setup_env.sh`
 
 # LatentSync: Audio Conditioned Latent Diffusion Models for Lip Sync
 

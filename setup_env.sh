@@ -1,7 +1,10 @@
 #!/bin/bash
 
 # Create a new conda environment
-conda create -y -n latentsync python=3.12.9
+conda create -n latentsync python=3.12.9
+
+conda init
+
 conda activate latentsync
 
 # Install ffmpeg
@@ -9,6 +12,8 @@ conda install -y -c conda-forge ffmpeg
 
 # pip install numpy==2.2.3
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+pip install numba
 
 # Python dependencies
 pip install -r requirements.txt

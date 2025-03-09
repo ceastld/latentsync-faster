@@ -23,7 +23,7 @@ class FaceLandmarkDetector:
         
         Args:
             device: 设备，'cpu'或'cuda'
-            detector_type: 检测器类型，'onnx'、'face_alignment'或'mediapipe'
+            detector_type: 检测器类型，'onnx'或'face_alignment'
             face_detector_path: 人脸检测器模型路径，如果为None则使用默认路径
             landmark_detector_path: 关键点检测器模型路径，如果为None则使用默认路径
             enable_timing: 是否启用时间测量
@@ -46,10 +46,11 @@ class FaceLandmarkDetector:
             self._init_onnx_detector()
         elif detector_type == "face_alignment":
             self._init_face_alignment()
-        elif detector_type == "mediapipe":
-            self._init_mediapipe()
         else:
-            raise ValueError(f"不支持的检测器类型: {detector_type}")
+            # 如果指定了不支持的检测器类型，默认使用ONNX
+            self.detector_type = "onnx"
+            self._init_onnx_detector()
+            print(f"不支持的检测器类型: {detector_type}，已切换为默认的ONNX检测器")
     
     def _init_onnx_detector(self):
         """初始化ONNX检测器"""
@@ -77,14 +78,6 @@ class FaceLandmarkDetector:
         except ImportError:
             raise ImportError("未安装face_alignment库，请使用pip install face-alignment安装")
     
-    def _init_mediapipe(self):
-        """初始化MediaPipe检测器"""
-        try:
-            import mediapipe as mp
-            self.face_mesh = mp.solutions.face_mesh.FaceMesh(static_image_mode=True)
-        except ImportError:
-            raise ImportError("未安装mediapipe库，请使用pip install mediapipe安装")
-    
     def detect_face(self, image: np.ndarray) -> Tuple[Optional[np.ndarray], float]:
         """
         检测图像中的人脸
@@ -100,9 +93,9 @@ class FaceLandmarkDetector:
         elif self.detector_type == "face_alignment":
             # face_alignment库不直接提供边界框，返回None
             return None, 0.0
-        elif self.detector_type == "mediapipe":
-            # MediaPipe不直接提供边界框，返回None
-            return None, 0.0
+        else:
+            # 默认使用ONNX
+            return self._detect_face_onnx(image)
     
     def _detect_face_onnx(self, image: np.ndarray) -> Tuple[Optional[np.ndarray], float]:
         """使用ONNX模型检测人脸"""
@@ -193,8 +186,9 @@ class FaceLandmarkDetector:
             return self._get_landmarks_onnx(image)
         elif self.detector_type == "face_alignment":
             return self._get_landmarks_face_alignment(image)
-        elif self.detector_type == "mediapipe":
-            return self._get_landmarks_mediapipe(image)
+        else:
+            # 默认使用ONNX
+            return self._get_landmarks_onnx(image)
     
     def _get_landmarks_onnx(self, image: np.ndarray) -> Optional[List[np.ndarray]]:
         """使用ONNX模型获取关键点"""
@@ -285,65 +279,6 @@ class FaceLandmarkDetector:
                 print(f"face_alignment检测失败: {str(e)}")
             return None
     
-    def _get_landmarks_mediapipe(self, image: np.ndarray) -> Optional[List[np.ndarray]]:
-        """使用MediaPipe获取关键点"""
-        try:
-            results = self.face_mesh.process(image)
-            if not results.multi_face_landmarks:
-                if self.enable_timing:
-                    print("未检测到人脸")
-                return None
-            
-            height, width, _ = image.shape
-            landmarks_list = []
-            
-            for face_landmarks in results.multi_face_landmarks:
-                # 提取关键点坐标
-                landmark_coordinates = np.array([
-                    (landmark.x * width, landmark.y * height) 
-                    for landmark in face_landmarks.landmark
-                ])
-                
-                # 转换为68点格式
-                lm68 = self._mediapipe_to_68_points(landmark_coordinates)
-                landmarks_list.append(lm68)
-            
-            return landmarks_list
-        except Exception as e:
-            if self.enable_timing:
-                print(f"MediaPipe检测失败: {str(e)}")
-            return None
-    
-    def _mediapipe_to_68_points(self, lm478: np.ndarray) -> np.ndarray:
-        """将MediaPipe的478点转换为68点格式"""
-        # 这里实现MediaPipe关键点到68点格式的映射
-        # 简化版本，实际应根据具体需求实现
-        indices = [
-            # 轮廓点 (0-16)
-            162, 21, 54, 103, 67, 109, 10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361,
-            # 眉毛点 (17-26)
-            70, 63, 105, 66, 107, 336, 296, 334, 293, 300,
-            # 鼻子点 (27-35)
-            6, 168, 197, 195, 5, 4, 98, 97, 2,
-            # 眼睛点 (36-47)
-            33, 160, 158, 133, 153, 144, 362, 385, 387, 263, 373, 380,
-            # 嘴巴点 (48-67)
-            61, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146, 61
-        ]
-        
-        # 确保索引在有效范围内
-        valid_indices = [i for i in indices if i < len(lm478)]
-        if len(valid_indices) < 68:
-            # 如果没有足够的点，填充缺失的点
-            lm68 = np.zeros((68, 2), dtype=np.float32)
-            for i, idx in enumerate(valid_indices):
-                lm68[i] = lm478[idx]
-        else:
-            lm68 = np.array([lm478[i] for i in indices[:68]])
-        
-        return lm68
-    
     def close(self):
         """关闭检测器并释放资源"""
-        if self.detector_type == "mediapipe" and hasattr(self, 'face_mesh'):
-            self.face_mesh.close() 
+        pass 

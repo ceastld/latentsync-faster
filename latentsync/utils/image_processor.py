@@ -15,7 +15,6 @@
 from torchvision import transforms
 import cv2
 from einops import rearrange
-import mediapipe as mp
 import torch
 import numpy as np
 from typing import Union
@@ -49,10 +48,7 @@ class ImageProcessor:
         self.normalize = transforms.Normalize([0.5], [0.5], inplace=True)
         self.mask = mask
 
-        if mask in ["mouth", "face", "eye"]:
-            self.face_mesh = mp.solutions.face_mesh.FaceMesh(static_image_mode=True)  # Process single image
         if mask == "fix_mask":
-            self.face_mesh = None
             self.smoother = laplacianSmooth()
             self.restorer = AlignRestore()
 
@@ -66,34 +62,31 @@ class ImageProcessor:
                 detector_type="onnx",  # 默认使用ONNX检测器
                 enable_timing=enable_timing
             )
+        elif mask in ["mouth", "face", "eye"]:
+            print(f"警告: mask类型 '{mask}' 依赖MediaPipe，该功能已被移除。正在使用默认的'fix_mask'替代。")
+            self.mask = "fix_mask"
+            self.smoother = laplacianSmooth()
+            self.restorer = AlignRestore()
+            if mask_image is None:
+                self.mask_image = load_fixed_mask(resolution)
+            else:
+                self.mask_image = mask_image
+                
+            self.face_detector = FaceLandmarkDetector(
+                device=device,
+                detector_type="onnx",
+                enable_timing=enable_timing
+            )
 
     def detect_facial_landmarks(self, image: np.ndarray):
-        height, width, _ = image.shape
-        results = self.face_mesh.process(image)
-        if not results.multi_face_landmarks:  # Face not detected
-            raise RuntimeError("Face not detected")
-        face_landmarks = results.multi_face_landmarks[0]  # Only use the first face in the image
-        landmark_coordinates = [
-            (int(landmark.x * width), int(landmark.y * height)) for landmark in face_landmarks.landmark
-        ]  # x means width, y means height
-        return landmark_coordinates
+        raise NotImplementedError("MediaPipe功能已被移除，此方法不再可用。请使用'fix_mask'模式或ONNX检测器。")
 
     def preprocess_one_masked_image(self, image: torch.Tensor) -> np.ndarray:
         image = self.resize(image)
 
-        if self.mask == "mouth" or self.mask == "face":
-            landmark_coordinates = self.detect_facial_landmarks(image)
-            if self.mask == "mouth":
-                surround_landmarks = mouth_surround_landmarks
-            else:
-                surround_landmarks = face_surround_landmarks
-
-            points = [landmark_coordinates[landmark] for landmark in surround_landmarks]
-            points = np.array(points)
-            mask = np.ones((self.resolution, self.resolution))
-            mask = cv2.fillPoly(mask, pts=[points], color=(0, 0, 0))
-            mask = torch.from_numpy(mask)
-            mask = mask.unsqueeze(0)
+        if self.mask in ["mouth", "face"]:
+            print(f"警告: mask类型 '{self.mask}' 依赖MediaPipe，该功能已被移除。使用默认的全局mask。")
+            mask = torch.ones((1, self.resolution, self.resolution))
         elif self.mask == "half":
             mask = torch.ones((self.resolution, self.resolution))
             height = mask.shape[0]
@@ -199,37 +192,15 @@ class ImageProcessor:
         """关闭并释放资源"""
         if hasattr(self, 'face_detector'):
             self.face_detector.close()
-        if self.face_mesh is not None:
-            self.face_mesh.close()
 
 
 def mediapipe_lm478_to_face_alignment_lm68(lm478, return_2d=True):
-    """将MediaPipe的478点关键点转换为face_alignment的68点格式"""
-    # 定义MediaPipe到68点的映射（简化）
-    mapping = {
-        # 轮廓点 (0-16)
-        0: 127, 1: 234, 2: 93, 3: 132, 4: 58, 5: 172, 6: 136, 7: 150, 8: 176, 9: 148, 10: 152, 11: 377, 12: 400, 13: 378, 14: 379, 15: 365, 16: 397,
-        # 眉毛点 (17-26)
-        17: 70, 18: 63, 19: 105, 20: 66, 21: 107, 22: 336, 23: 296, 24: 334, 25: 293, 26: 300,
-        # 鼻子点 (27-35)
-        27: 6, 28: 168, 29: 197, 30: 195, 31: 5, 32: 4, 33: 98, 34: 97, 35: 2,
-        # 眼睛点 (36-47)
-        36: 33, 37: 160, 38: 158, 39: 133, 40: 153, 41: 144, 42: 362, 43: 385, 44: 387, 45: 263, 46: 373, 47: 380,
-        # 嘴巴点 (48-67)
-        48: 61, 49: 40, 50: 39, 51: 37, 52: 0, 53: 267, 54: 269, 55: 270, 56: 409, 57: 291, 58: 375, 59: 321, 60: 405, 61: 314, 62: 17, 63: 84, 64: 181, 65: 91, 66: 146, 67: 61
-    }
-
-    # lm478[..., 0] *= W
-    # lm478[..., 1] *= H
-
-    lm68 = np.zeros((68, 3 if not return_2d else 2))
-    for i, j in mapping.items():
-        if j < len(lm478):
-            lm68[i, :2] = lm478[j, :2]
-            if not return_2d and len(lm478[j]) > 2:
-                lm68[i, 2] = lm478[j, 2]
-
-    return lm68
+    """此功能已废弃，仅保留函数签名以兼容旧代码"""
+    print("警告: mediapipe_lm478_to_face_alignment_lm68函数依赖MediaPipe，该功能已被移除。返回空结果。")
+    if return_2d:
+        return np.zeros((68, 2))
+    else:
+        return np.zeros((68, 3))
 
 
 landmark_points_68 = [

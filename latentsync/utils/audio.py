@@ -65,21 +65,13 @@ def melspectrogram(wav):
     return S
 
 
-def _lws_processor():
-    import lws
-
-    return lws.lws(config.audio.n_fft, get_hop_size(), fftsize=config.audio.win_size, mode="speech")
-
-
 def _stft(y):
-    if config.audio.use_lws:
-        return _lws_processor(config.audio).stft(y).T
-    else:
-        return librosa.stft(y=y, n_fft=config.audio.n_fft, hop_length=get_hop_size(), win_length=config.audio.win_size)
+    # 使用librosa进行短时傅里叶变换
+    return librosa.stft(y=y, n_fft=config.audio.n_fft, hop_length=get_hop_size(), win_length=config.audio.win_size)
 
 
 ##########################################################
-# Those are only correct when using lws!!! (This was messing with Wavenet quality for a long time!)
+# 通用帧数计算函数
 def num_frames(length, fsize, fshift):
     """Compute number of time frames of spectrogram"""
     pad = fsize - fshift
