@@ -10,7 +10,7 @@ data:
   val_audio_path: assets/demo1_audio.wav
   batch_size: 2
   num_workers: 11
-  num_frames: 16
+  num_frames: 8
   resolution: 256
   mask: fix_mask
   audio_sample_rate: 16000

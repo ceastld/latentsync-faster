@@ -30,7 +30,6 @@ class FaceLandmarkDetector:
         """
         self.device = device
         self.detector_type = detector_type
-        self.enable_timing = enable_timing
         
         # 设置默认模型路径
         if face_detector_path is None:
@@ -111,21 +110,19 @@ class FaceLandmarkDetector:
         img = img.astype(np.float32)
         
         # 运行检测器
-        start_time = time.time() if self.enable_timing else 0
         confidences, boxes = self.face_detector.run(None, {self.face_detector_input_name: img})
-        face_detection_time = time.time() - start_time if self.enable_timing else 0
         
         # 获取边界框
         boxes, labels, probs = self._predict_boxes(orig_size[1], orig_size[0], confidences, boxes, 0.7)
         
         if len(boxes) == 0:
-            return None, face_detection_time
+            return None
         
         # 只取概率最高的人脸
         max_idx = np.argmax(probs)
         box = boxes[max_idx]
         
-        return box, face_detection_time
+        return box
     
     def _predict_boxes(self, width, height, confidences, boxes, prob_threshold=0.7, iou_threshold=0.3, top_k=-1):
         """预测人脸边界框"""
@@ -193,30 +190,20 @@ class FaceLandmarkDetector:
     def _get_landmarks_onnx(self, image: np.ndarray) -> Optional[List[np.ndarray]]:
         """使用ONNX模型获取关键点"""
         # 检测人脸
-        box, _ = self._detect_face_onnx(image)
+        box = self._detect_face_onnx(image)
         if box is None:
-            if self.enable_timing:
-                print("未检测到人脸")
+            print("未检测到人脸")
             return None
         
         # 预处理关键点输入
-        start_time = time.time() if self.enable_timing else 0
         face_input, bbox_info = self._preprocess_landmark_input(image, box)
-        preprocess_time = time.time() - start_time if self.enable_timing else 0
         
         # 运行关键点检测
-        landmark_start_time = time.time() if self.enable_timing else 0
         face_input = face_input.astype(np.float32)
         landmark_outputs = self.landmark_detector.run(None, {'input': face_input})
-        landmark_time = time.time() - landmark_start_time if self.enable_timing else 0
         
         # 处理关键点输出
         landmarks = self._process_landmark_output(landmark_outputs[0], bbox_info)
-        
-        # 打印时间信息
-        if self.enable_timing:
-            total_time = preprocess_time + landmark_time
-            print(f"预处理: {preprocess_time:.4f}秒, 关键点检测: {landmark_time:.4f}秒, 总计: {total_time:.4f}秒")
         
         return [landmarks]
     

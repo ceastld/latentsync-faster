@@ -352,10 +352,6 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
             [`~models.unet_2d_condition.UNet2DConditionOutput`] if `return_dict` is True, otherwise a `tuple`. When
             returning a tuple, the first element is the sample tensor.
         """
-        # 初始化计时
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # start_time = time.time()
         
         # By default samples have to be AT least a multiple of the overall upsampling factor.
         # The overall upsampling factor is equal to 2 ** (# num of upsampling layears).
@@ -415,23 +411,9 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
             class_emb = self.class_embedding(class_labels).to(dtype=self.dtype)
             emb = emb + class_emb
 
-        # pre-process timing
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # preprocess_start = time.time()
         
         # pre-process
         sample = self.conv_in(sample)
-        
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # preprocess_time = time.time() - preprocess_start
-        # print(f"预处理时间: {preprocess_time:.4f} 秒")
-        
-        # down timing
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # down_start = time.time()
         
         # down
         down_block_res_samples = (sample,)
@@ -449,11 +431,6 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
                 )
 
             down_block_res_samples += res_samples
-            
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # down_time = time.time() - down_start
-        # print(f"下采样时间: {down_time:.4f} 秒")
         
         # support controlnet
         down_block_res_samples = list(down_block_res_samples)
@@ -463,20 +440,12 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
                     down_block_additional_residual = down_block_additional_residual.unsqueeze(2)
                 down_block_res_samples[i] = down_block_res_samples[i] + down_block_additional_residual
 
-        # mid timing
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # mid_start = time.time()
         
         # mid
         sample = self.mid_block(
             sample, emb, encoder_hidden_states=encoder_hidden_states, attention_mask=attention_mask
         )
-        
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # mid_time = time.time() - mid_start
-        # print(f"中间块处理时间: {mid_time:.4f} 秒")
+
 
         # support controlnet
         if mid_block_additional_residual is not None:
@@ -484,10 +453,6 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
                 mid_block_additional_residual = mid_block_additional_residual.unsqueeze(2)
             sample = sample + mid_block_additional_residual
 
-        # up timing
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # up_start = time.time()
         
         # up
         for i, upsample_block in enumerate(self.up_blocks):
@@ -517,31 +482,12 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
                     encoder_hidden_states=encoder_hidden_states,
                 )
                 
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # up_time = time.time() - up_start
-        # print(f"上采样时间: {up_time:.4f} 秒")
-
-        # post-process timing
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # postprocess_start = time.time()
         
         # post-process
         sample = self.conv_norm_out(sample)
         sample = self.conv_act(sample)
         sample = self.conv_out(sample)
         
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # postprocess_time = time.time() - postprocess_start
-        # print(f"后处理时间: {postprocess_time:.4f} 秒")
-        
-        # # 总时间
-        # if torch.cuda.is_available():
-        #     torch.cuda.synchronize()
-        # total_time = time.time() - start_time
-        # print(f"总运行时间: {total_time:.4f} 秒")
 
         if not return_dict:
             return (sample,)

@@ -109,52 +109,31 @@ class ImageProcessor:
         return pixel_values, masked_pixel_values, mask
 
     def affine_transform(self, image: torch.Tensor) -> np.ndarray:
-        step_times = {}
-        total_start = time.time()
         
         # 步骤1: 检测面部关键点
-        landmarks_start = time.time()
         detected_faces = self.face_detector.get_landmarks(image)
         if detected_faces is None:
             raise RuntimeError("Face not detected")
         lm68 = detected_faces[0]
-        landmarks_end = time.time()
-        step_times['面部关键点检测'] = landmarks_end - landmarks_start
         
         # 步骤2: 关键点平滑
-        smooth_start = time.time()
         points = self.smoother.smooth(lm68)
         lmk3_ = np.zeros((3, 2))
         lmk3_[0] = points[17:22].mean(0)
         lmk3_[1] = points[22:27].mean(0)
         lmk3_[2] = points[27:36].mean(0)
-        smooth_end = time.time()
-        step_times['关键点平滑'] = smooth_end - smooth_start
         
         # 步骤3: 计算并应用仿射变换
-        transform_start = time.time()
         face, affine_matrix = self.restorer.align_warp_face(
             image.copy(), lmks3=lmk3_, smooth=True, border_mode="constant"
         )
-        transform_end = time.time()
-        step_times['仿射变换'] = transform_end - transform_start
         
         box = [0, 0, face.shape[1], face.shape[0]]  # x1, y1, x2, y2
         
         # 步骤4: 调整图像大小
-        resize_start = time.time()
         face = cv2.resize(face, (self.resolution, self.resolution), interpolation=cv2.INTER_LANCZOS4)
         face = rearrange(torch.from_numpy(face), "h w c -> c h w")
-        resize_end = time.time()
-        step_times['调整图像大小'] = resize_end - resize_start
         
-        total_end = time.time()
-        step_times['总计'] = total_end - total_start
-        
-        # 打印每个步骤的时间
-        for step, t in step_times.items():
-            print(f"  - {step}: {t:.4f}秒")
-            
         return face, box, affine_matrix
 
     def preprocess_fixed_mask_image(self, image: torch.Tensor, affine_transform=False):

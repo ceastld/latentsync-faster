@@ -53,10 +53,7 @@ class AlignRestore(object):
 
     def align_warp_face(self, img, lmks3, smooth=True, border_mode="constant"):
         # 计算仿射变换矩阵
-        matrix_start = time.time()
         affine_matrix, self.p_bias = transformation_from_points(lmks3, self.face_template, smooth, self.p_bias)
-        matrix_end = time.time()
-        matrix_time = matrix_end - matrix_start
         
         if border_mode == "constant":
             border_mode = cv2.BORDER_CONSTANT
@@ -66,7 +63,6 @@ class AlignRestore(object):
             border_mode = cv2.BORDER_REFLECT
 
         # 应用仿射变换
-        warp_start = time.time()
         cropped_face = cv2.warpAffine(
             img,
             affine_matrix,
@@ -75,11 +71,6 @@ class AlignRestore(object):
             borderMode=border_mode,
             borderValue=[127, 127, 127],
         )
-        warp_end = time.time()
-        warp_time = warp_end - warp_start
-        
-        print(f"    - 变换矩阵计算: {matrix_time:.4f}秒")
-        print(f"    - 仿射变换应用: {warp_time:.4f}秒")
         
         return cropped_face, affine_matrix
 
@@ -135,26 +126,19 @@ class laplacianSmooth:
         self.pts_last = None
 
     def smooth(self, pts_cur):
-        import time
-        smooth_start = time.time()
         
         if self.pts_last is None:
             self.pts_last = pts_cur.copy()
-            smooth_end = time.time()
-            print(f"    - 首次关键点平滑 (仅复制): {smooth_end - smooth_start:.4f}秒")
             return pts_cur.copy()
             
         # 计算边界
-        boundary_start = time.time()
         x1 = min(pts_cur[:, 0])
         x2 = max(pts_cur[:, 0])
         y1 = min(pts_cur[:, 1])
         y2 = max(pts_cur[:, 1])
         width = x2 - x1
-        boundary_end = time.time()
         
         # 平滑算法
-        update_start = time.time()
         pts_update = []
         for i in range(len(pts_cur)):
             x_new, y_new = pts_cur[i]
@@ -165,19 +149,8 @@ class laplacianSmooth:
             y = y_old * w + y_new * (1 - w)
             pts_update.append([x, y])
         pts_update = np.array(pts_update)
-        update_end = time.time()
         
         # 更新上一帧数据
-        copy_start = time.time()
         self.pts_last = pts_update.copy()
-        copy_end = time.time()
-        
-        smooth_end = time.time()
-        
-        # 打印各个子步骤的时间
-        print(f"    - 关键点平滑总时间: {smooth_end - smooth_start:.4f}秒")
-        print(f"      - 边界计算: {boundary_end - boundary_start:.4f}秒")
-        print(f"      - 平滑算法: {update_end - update_start:.4f}秒")
-        print(f"      - 数据复制: {copy_end - copy_start:.4f}秒")
 
         return pts_update
