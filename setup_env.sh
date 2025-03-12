@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Create a new conda environment
-conda create -n latentsync python=3.12.9
+conda create -n latentsync python=3.12.9 -y
 
 conda init
 
