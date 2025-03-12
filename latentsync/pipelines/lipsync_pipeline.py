@@ -4,13 +4,14 @@ from dataclasses import dataclass
 import inspect
 import os
 import shutil
-from typing import Callable, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 import subprocess
 import time
 
 import numpy as np
 import torch
 import torchvision
+import cv2
 
 from diffusers.utils import is_accelerate_available
 from packaging import version
@@ -29,7 +30,6 @@ from diffusers.schedulers import (
 from diffusers.utils import deprecate, logging
 
 from einops import rearrange
-import cv2
 
 from ..models.unet import UNet3DConditionModel
 from ..utils.image_processor import ImageProcessor
@@ -50,6 +50,13 @@ class InitializedParams:
     num_frames: int
     num_channels_latents: int
 
+@dataclass
+class LipsyncMetadata:
+    face: torch.Tensor  # 处理后的人脸图像
+    box: np.ndarray  # 人脸边界框
+    affine_matrice: np.ndarray  # 仿射变换矩阵
+    original_frame: np.ndarray  # 原始视频帧
+
 class LipsyncPipeline(DiffusionPipeline):
     _optional_components = []
 
@@ -66,6 +73,7 @@ class LipsyncPipeline(DiffusionPipeline):
             EulerAncestralDiscreteScheduler,
             DPMSolverMultistepScheduler,
         ],
+        use_compile: bool = False,
     ):
         super().__init__()
 
@@ -121,8 +129,9 @@ class LipsyncPipeline(DiffusionPipeline):
         self.audio_encoder = audio_encoder # for code compilation
         self.vae = vae # for code compilation
         self.scheduler = scheduler # for code compilation
-        unet = torch.compile(unet, mode="reduce-overhead", fullgraph=True)
-        vae = torch.compile(vae, mode="reduce-overhead", fullgraph=True)
+        if use_compile:
+            unet = torch.compile(unet, mode="reduce-overhead", fullgraph=True)
+            vae = torch.compile(vae, mode="reduce-overhead", fullgraph=True)
 
         self.register_modules(
             vae=vae,
@@ -281,40 +290,61 @@ class LipsyncPipeline(DiffusionPipeline):
         return images
 
     def affine_transform_video(self, video_path):
-        
+        """使用LipsyncMetadata处理视频帧"""
         video_frames = read_video(video_path, use_decord=False)
-        faces = []
-        boxes = []
-        affine_matrices = []
-        processing_times = []
+        metadata_list = []
         
         print(f"Affine transforming {len(video_frames)} faces...")
         for frame in tqdm.tqdm(video_frames):
-            face, box, affine_matrix = self.image_processor.affine_transform(frame)
-            
-            faces.append(face)
-            boxes.append(box)
-            affine_matrices.append(affine_matrix)
-
-        faces = torch.stack(faces)
+            try:
+                face, box, affine_matrix = self.image_processor.affine_transform(frame)
+                
+                # 创建LipsyncMetadata对象存储处理结果
+                metadata = LipsyncMetadata(
+                    face=face,
+                    box=box,
+                    affine_matrice=affine_matrix,
+                    original_frame=frame
+                )
+                metadata_list.append(metadata)
+            except Exception as e:
+                print(f"Face preprocessing failed: {e}")
+                # 如果处理失败且有其他成功处理的帧，使用前一帧的结果
+                if len(metadata_list) > 0:
+                    metadata_list.append(metadata_list[-1])
+                # 否则跳过此帧
         
-        return faces, video_frames, boxes, affine_matrices
+        if len(metadata_list) == 0:
+            return None
+        
+        return metadata_list
 
-    def restore_video(self, faces, video_frames, boxes, affine_matrices):
-        video_frames = video_frames[: faces.shape[0]]
+    def restore_video(self, metadata_list):
+        """使用LipsyncMetadata恢复视频帧"""
         out_frames = []
-        print(f"Restoring {len(faces)} faces...")
-        for index, face in enumerate(tqdm.tqdm(faces)):
-            x1, y1, x2, y2 = boxes[index]
+        print(f"Restoring {len(metadata_list)} faces...")
+        for metadata in tqdm.tqdm(metadata_list):
+            x1, y1, x2, y2 = metadata.box
             height = int(y2 - y1)
             width = int(x2 - x1)
+            
+            # 获取处理后的人脸
+            face = metadata.face
+            
+            # 调整人脸大小
             face = torchvision.transforms.functional.resize(face, size=(height, width), antialias=True)
             face = rearrange(face, "c h w -> h w c")
             face = (face / 2 + 0.5).clamp(0, 1)
             face = (face * 255).to(torch.uint8).cpu().numpy()
-            # face = cv2.resize(face, (width, height), interpolation=cv2.INTER_LANCZOS4)
-            out_frame = self.image_processor.restorer.restore_img(video_frames[index], face, affine_matrices[index])
+            
+            # 使用restorer将人脸放回原始帧
+            out_frame = self.image_processor.restorer.restore_img(
+                metadata.original_frame, 
+                face, 
+                metadata.affine_matrice
+            )
             out_frames.append(out_frame)
+            
         return np.stack(out_frames, axis=0)
 
     @torch.no_grad()
@@ -375,10 +405,7 @@ class LipsyncPipeline(DiffusionPipeline):
             print(f"Total audio feature count: {total_audio_chunks}, total video frame count: {total_frames}")
         
         # Initialize result storage
-        processed_frames = []
-        boxes_list = []
-        affine_matrices_list = []
-        original_frames_list = []
+        metadata_list_all = []  # 存储所有批次的metadata列表
         batch_times = []
         batch_step_times = {}  # Store time for each batch step
         
@@ -407,19 +434,20 @@ class LipsyncPipeline(DiffusionPipeline):
             
             # 2. Facial preprocessing (single batch processing)
             preprocess_start = time.time()
-            faces, original_frames, boxes, affine_matrices = self._preprocess_face_batch(frames)
+            metadata_list = self._preprocess_face_batch(frames)
             preprocess_end = time.time()
             batch_step_times[batch_idx]["Facial preprocessing"] = preprocess_end - preprocess_start
             
-            if faces is None or len(faces) == 0:
+            if metadata_list is None:
                 print(f"Batch {batch_idx+1} No valid face detected, skipping")
                 batch_idx += 1
                 continue
                 
-            # Store original frames and transformation info, for final restoration
-            original_frames_list.append(original_frames)
-            boxes_list.append(boxes)
-            affine_matrices_list.append(affine_matrices)
+            # 从metadata中提取处理后的人脸图像，用于后续处理
+            faces = torch.stack([metadata.face for metadata in metadata_list])
+                
+            # Store metadata list for final restoration
+            metadata_list_all.append(metadata_list)
             
             # 3. Prepare audio features for the current batch
             audio_start = time.time()
@@ -449,8 +477,16 @@ class LipsyncPipeline(DiffusionPipeline):
             for step, step_time in diffusion_step_times.items():
                 batch_step_times[batch_idx][step] = step_time
             
-            # Save processed frames
-            processed_frames.append(synced_faces_batch)
+            # 更新metadata_list中的face字段，存储处理后的人脸
+            for i, metadata in enumerate(metadata_list):
+                # 创建一个新的LipsyncMetadata对象，包含原始数据和处理后的人脸
+                updated_metadata = LipsyncMetadata(
+                    face=synced_faces_batch[i],  # 使用处理后的人脸
+                    box=metadata.box,
+                    affine_matrice=metadata.affine_matrice,
+                    original_frame=metadata.original_frame
+                )
+                metadata_list[i] = updated_metadata
             
             # Calculate and record batch processing time
             batch_end_time = time.time()
@@ -476,7 +512,7 @@ class LipsyncPipeline(DiffusionPipeline):
         # Close video stream
         video_capture.release()
         
-        if len(processed_frames) == 0:
+        if len(metadata_list_all) == 0:
             print("No valid frames generated, check if video contains recognizable faces")
             return None
         
@@ -490,7 +526,7 @@ class LipsyncPipeline(DiffusionPipeline):
         print("Starting video restoration and saving...")
         restore_start_time = time.time()
         output_video = self._restore_and_save_stream(
-            processed_frames, original_frames_list, boxes_list, affine_matrices_list,
+            metadata_list_all,
             audio_samples, video_fps, audio_sample_rate, video_out_path
         )
         restore_end_time = time.time()
@@ -507,7 +543,7 @@ class LipsyncPipeline(DiffusionPipeline):
             
         return output_video
     
-    def _init_video_stream(self, video_path):
+    def _init_video_stream(self, video_path: str) -> tuple[cv2.VideoCapture, int]:
         """Initialize video stream reading"""
         # Open video file
         video_capture = cv2.VideoCapture(video_path)
@@ -519,9 +555,9 @@ class LipsyncPipeline(DiffusionPipeline):
         
         return video_capture, total_frames
     
-    def _read_frame_batch(self, video_capture, batch_size):
+    def _read_frame_batch(self, video_capture: cv2.VideoCapture, batch_size: int) -> tuple[List[np.ndarray], bool]:
         """Read a batch of video frames"""
-        frames = []
+        frames: List[np.ndarray] = []
         is_last_batch = False
         
         for _ in range(batch_size):
@@ -536,45 +572,41 @@ class LipsyncPipeline(DiffusionPipeline):
             
         return frames, is_last_batch
         
-    def _preprocess_face_batch(self, frames):
+    def _preprocess_face_batch(self, frames: List[np.ndarray]) -> Optional[List[LipsyncMetadata]]:
         """Process a batch of frames for facial preprocessing, using the same face alignment logic as the original method"""
         """Core function for face_processor"""
         if len(frames) == 0:
-            return None, None, None, None
+            return None
             
-        faces = []
-        boxes = []
-        affine_matrices = []
-        original_frames = []
+        metadata_list: List[LipsyncMetadata] = []
         
         # Use the same preprocessing logic as original code
         for frame in frames:
             try:
                 # Use the same processing logic as the original affine_transform_video
                 face, box, affine_matrix = self.image_processor.affine_transform(frame)
-                faces.append(face)
-                boxes.append(box)
-                affine_matrices.append(affine_matrix)
-                original_frames.append(frame)
+                # 创建LipsyncMetadata对象存储处理结果
+                metadata = LipsyncMetadata(
+                    face=face,
+                    box=box,
+                    affine_matrice=affine_matrix,
+                    original_frame=frame
+                )
+                metadata_list.append(metadata)
             except Exception as e:
                 print(f"Face preprocessing failed: {e}")
                 # If processing fails and there are other successfully processed frames, use the result of the previous frame
-                if len(faces) > 0:
-                    faces.append(faces[-1])
-                    boxes.append(boxes[-1])
-                    affine_matrices.append(affine_matrices[-1])
-                    original_frames.append(frame)
+                if len(metadata_list) > 0:
+                    metadata_list.append(metadata_list[-1])
                 # Otherwise skip this frame
         
-        if len(faces) == 0:
-            return None, None, None, None
+        if len(metadata_list) == 0:
+            return None
             
-        # Convert to batch tensor
-        faces_tensor = torch.stack(faces)
+        return metadata_list
         
-        return faces_tensor, original_frames, boxes, affine_matrices
-        
-    def _prepare_audio_batch(self, whisper_feature, batch_idx, num_frames_in_batch, params):
+    def _prepare_audio_batch(self, whisper_feature: Optional[torch.Tensor], batch_idx: int, 
+                           num_frames_in_batch: int, params: InitializedParams) -> Optional[List[torch.Tensor]]:
         """Prepare audio features for the current batch"""
         """NOT the core function for audio_processor. Need further work for stream processing"""
         if not self.unet.add_audio_layer or whisper_feature is None:
@@ -606,11 +638,15 @@ class LipsyncPipeline(DiffusionPipeline):
         
         return selected_chunks
         
-    def _run_diffusion_batch(self, faces, audio_features, params, num_inference_steps,
-                          guidance_scale, weight_dtype, extra_step_kwargs, generator, callback, callback_steps):
+    def _run_diffusion_batch(self, faces: torch.Tensor, audio_features: Optional[List[torch.Tensor]], 
+                          params: InitializedParams, num_inference_steps: int,
+                          guidance_scale: float, weight_dtype: torch.dtype, 
+                          extra_step_kwargs: dict, generator: Optional[Union[torch.Generator, List[torch.Generator]]], 
+                          callback: Optional[Callable[[int, int, torch.FloatTensor], None]], 
+                          callback_steps: Optional[int]) -> tuple[torch.Tensor, dict]:
         """Run diffusion inference on a single batch"""
         """Core function for diffusion_processor"""
-        step_times = {}  # Record time for each step
+        step_times: dict = {}  # Record time for each step
         
         # 1. Prepare latent variables
         latents_start = time.time()
@@ -741,55 +777,25 @@ class LipsyncPipeline(DiffusionPipeline):
         
         return decoded_latents, step_times
         
-    def _restore_and_save_stream(self, processed_frames, original_frames_list, boxes_list, affine_matrices_list,
-                               audio_samples, video_fps, audio_sample_rate, video_out_path):
+    def _restore_and_save_stream(self, metadata_list_all: List[List[LipsyncMetadata]],
+                               audio_samples: torch.Tensor, video_fps: int, 
+                               audio_sample_rate: int, video_out_path: str) -> Optional[str]:
         """Restore processed frames to original video and save"""
-        # Check if there are processed frames
-        if not processed_frames:
+        # Check if there are metadata
+        if not metadata_list_all:
             print("No successfully processed frames, cannot restore video")
             return None
         
-        print(f"Restoring video: Processed {len(processed_frames)} batches of data")
+        print(f"Restoring video: Processed {len(metadata_list_all)} batches of data")
         
-        # Record frame count for each batch, for validation and debugging
-        batch_frame_counts = [len(frames) for frames in processed_frames]
-        total_processed_frames = sum(batch_frame_counts)
-        print(f"Total processed frames: {total_processed_frames}, batch frame distribution: {batch_frame_counts}")
-        
-        # Combine all processed frames from all batches
-        all_processed_frames = torch.cat(processed_frames)
-        
-        # Create valid original frames, bounding boxes and affine matrices list
-        # Ensure they correspond one-to-one with processed frames
-        valid_original_frames = []
-        valid_boxes = []
-        valid_affine_matrices = []
-        processed_frame_idx = 0
-        
-        # For each batch, extract the correct number of original frames and transformation info
-        for batch_idx, frames_count in enumerate(batch_frame_counts):
-            if batch_idx < len(original_frames_list):
-                # Ensure we don't exceed the available frames for this batch
-                usable_frames = min(frames_count, len(original_frames_list[batch_idx]))
-                valid_original_frames.extend(original_frames_list[batch_idx][:usable_frames])
-                valid_boxes.extend(boxes_list[batch_idx][:usable_frames])
-                valid_affine_matrices.extend(affine_matrices_list[batch_idx][:usable_frames])
+        # 将所有批次的metadata列表合并为一个扁平列表
+        flat_metadata_list = []
+        for batch_metadata in metadata_list_all:
+            flat_metadata_list.extend(batch_metadata)
             
-        # Ensure lengths match
-        min_length = min(len(all_processed_frames), len(valid_original_frames))
-        if min_length < len(all_processed_frames):
-            print(f"Warning: Processed frame count ({len(all_processed_frames)}) doesn't match valid original frame count ({len(valid_original_frames)}), truncating to {min_length} frames")
-        
-        all_processed_frames = all_processed_frames[:min_length]
-        valid_original_frames = valid_original_frames[:min_length]
-        valid_boxes = valid_boxes[:min_length]
-        valid_affine_matrices = valid_affine_matrices[:min_length]
-        
-        # Restore video
-        print(f"Restoring {min_length} frames of video...")
-        synced_video_frames = self._restore_video_frames(
-            all_processed_frames, valid_original_frames, valid_boxes, valid_affine_matrices
-        )
+        # 使用restore_video方法恢复视频
+        print(f"Restoring {len(flat_metadata_list)} frames of video...")
+        synced_video_frames = self.restore_video(flat_metadata_list)
         
         # Process audio
         audio_samples_remain_length = int(len(synced_video_frames) / video_fps * audio_sample_rate)
@@ -814,41 +820,6 @@ class LipsyncPipeline(DiffusionPipeline):
         
         return video_out_path
         
-    def _restore_video_frames(self, faces, original_frames, boxes, affine_matrices):
-        """Restore generated faces to original frames
-        
-        This function implements the same logic as the original restore_video, ensuring consistency of the restoration process
-        """
-        restored_frames = []
-        
-        print(f"Restoring {len(faces)} frames of video...")
-        for i in range(len(faces)):
-            face = faces[i]
-            original = original_frames[i]
-            box = boxes[i]
-            matrix = affine_matrices[i]
-            
-            # Convert face from tensor to a format suitable for processing
-            if isinstance(face, torch.Tensor):
-                # Get bounding box dimensions
-                x1, y1, x2, y2 = box
-                height = int(y2 - y1)
-                width = int(x2 - x1)
-                
-                # Use the same resize method as the original restore_video
-                face = torchvision.transforms.functional.resize(face, size=(height, width), antialias=True)
-                face = rearrange(face, "c h w -> h w c")
-                face = (face / 2 + 0.5).clamp(0, 1)
-                face = (face * 255).to(torch.uint8).cpu().numpy()
-            
-            # Use the restorer to place the face back into the original frame, consistent with original restore_video
-            result = self.image_processor.restorer.restore_img(original, face, matrix)
-            restored_frames.append(result)
-        
-        # Convert to torch tensor for the write_video function
-        
-        return np.stack(restored_frames, axis=0)
-    
     def _initialize_parameters(self, num_frames, height, width, mask, guidance_scale, callback_steps):
         """Initialize and validate parameters needed for inference"""
         # Simplified version, may need to check other conditions in actual use
