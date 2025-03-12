@@ -154,3 +154,30 @@ class laplacianSmooth:
         self.pts_last = pts_update.copy()
 
         return pts_update
+
+if __name__ == "__main__":
+    align_restore = AlignRestore()
+    # Test restore_img function with a random test image
+    import cv2
+    import numpy as np
+    
+    # Create a random test image
+    h, w = 512, 512  # Random image size
+    test_img = np.random.randint(0, 255, (h, w, 3), dtype=np.uint8)
+    
+    # Create sample face landmarks for 3 points
+    lmk_align = np.array([
+        [w*0.3, h*0.3],  # Left eye
+        [w*0.7, h*0.3],  # Right eye
+        [w*0.5, h*0.6]   # Nose tip
+    ])
+    
+    # Align and restore the face
+    aligned_face, affine_matrix = align_restore.align_warp_face(test_img, lmk_align)
+    restored_img = align_restore.restore_img(test_img, aligned_face, affine_matrix)
+    
+    # Save results
+    cv2.imwrite("random_test_aligned.jpg", aligned_face)
+    cv2.imwrite("random_test_restored.jpg", restored_img)
+    print("Results saved as random_test_aligned.jpg and random_test_restored.jpg")
+    
