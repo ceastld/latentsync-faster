@@ -3,25 +3,26 @@
 import numpy as np
 import cv2
 import time
+import torch
+import torch.nn.functional as F
 
 
 def transformation_from_points(points1, points0, smooth=True, p_bias=None):
-    points2 = np.array(points0)
-    points2 = points2.astype(np.float64)
-    points1 = points1.astype(np.float64)
-    c1 = np.mean(points1, axis=0)
-    c2 = np.mean(points2, axis=0)
+    points2 = torch.tensor(points0, dtype=torch.float32)
+    points1 = torch.tensor(points1, dtype=torch.float32)
+    c1 = torch.mean(points1, dim=0)
+    c2 = torch.mean(points2, dim=0)
     points1 -= c1
     points2 -= c2
-    s1 = np.std(points1)
-    s2 = np.std(points2)
+    s1 = torch.std(points1)
+    s2 = torch.std(points2)
     points1 /= s1
     points2 /= s2
-    U, S, Vt = np.linalg.svd(np.matmul(points1.T, points2))
-    R = (np.matmul(U, Vt)).T
+    U, S, V = torch.svd(torch.mm(points1.T, points2))
+    R = torch.mm(U, V.T).T
     sR = (s2 / s1) * R
-    T = c2.reshape(2, 1) - (s2 / s1) * np.matmul(R, c1.reshape(2, 1))
-    M = np.concatenate((sR, T), axis=1)
+    T = c2.reshape(2, 1) - (s2 / s1) * torch.mm(R, c1.reshape(2, 1))
+    M = torch.cat((sR, T), dim=1)
     if smooth:
         bias = points2[2] - points1[2]
         if p_bias is None:
@@ -30,11 +31,11 @@ def transformation_from_points(points1, points0, smooth=True, p_bias=None):
             bias = p_bias * 0.2 + bias * 0.8
         p_bias = bias
         M[:, 2] = M[:, 2] + bias
-    return M, p_bias
+    return M.cpu().numpy(), p_bias
 
 
 class AlignRestore(object):
-    def __init__(self, align_points=3):
+    def __init__(self, align_points=3, device='cuda' if torch.cuda.is_available() else 'cpu'):
         if align_points == 3:
             self.upscale_factor = 1
             ratio = 2.8
@@ -43,6 +44,7 @@ class AlignRestore(object):
             self.face_template = self.face_template * ratio
             self.face_size = (int(75 * self.crop_ratio[0]), int(100 * self.crop_ratio[1]))
             self.p_bias = None
+            self.device = device
 
     def process(self, img, lmk_align=None, smooth=True, align_points=3):
         aligned_face, affine_matrix = self.align_warp_face(img, lmk_align, smooth)
@@ -88,36 +90,97 @@ class AlignRestore(object):
         return cropped_face, affine_matrix
 
     def restore_img(self, input_img, face, affine_matrix):
-        h, w, _ = input_img.shape
+        # Convert inputs to PyTorch tensors
+        input_img_t = torch.from_numpy(input_img).to(self.device).float()
+        face_t = torch.from_numpy(face).to(self.device).float()
+        
+        h, w = input_img.shape[:2]
         h_up, w_up = int(h * self.upscale_factor), int(w * self.upscale_factor)
-        upsample_img = cv2.resize(input_img, (w_up, h_up), interpolation=cv2.INTER_LANCZOS4)
-        inverse_affine = cv2.invertAffineTransform(affine_matrix)
-        inverse_affine *= self.upscale_factor
+        
+        # Only upsample if necessary
         if self.upscale_factor > 1:
+            upsample_img_t = F.interpolate(
+                input_img_t.permute(2, 0, 1).unsqueeze(0),
+                size=(h_up, w_up),
+                mode='bilinear',
+                align_corners=False
+            ).squeeze(0).permute(1, 2, 0)
             extra_offset = 0.5 * self.upscale_factor
         else:
+            upsample_img_t = input_img_t
             extra_offset = 0
+            
+        # Convert affine matrix to tensor and compute inverse
+        affine_matrix_t = torch.from_numpy(affine_matrix).to(self.device).float()
+        inverse_affine = torch.from_numpy(cv2.invertAffineTransform(affine_matrix)).to(self.device).float()
+        inverse_affine *= self.upscale_factor
         inverse_affine[:, 2] += extra_offset
-        inv_restored = cv2.warpAffine(face, inverse_affine, (w_up, h_up), flags=cv2.INTER_LANCZOS4)
-        mask = np.ones((self.face_size[1], self.face_size[0]), dtype=np.float32)
-        inv_mask = cv2.warpAffine(mask, inverse_affine, (w_up, h_up))
-        inv_mask_erosion = cv2.erode(
-            inv_mask, np.ones((int(2 * self.upscale_factor), int(2 * self.upscale_factor)), np.uint8)
-        )
-        pasted_face = inv_mask_erosion[:, :, None] * inv_restored
-        total_face_area = np.sum(inv_mask_erosion)
-        w_edge = int(total_face_area**0.5) // 20
-        erosion_radius = w_edge * 2
-        inv_mask_center = cv2.erode(inv_mask_erosion, np.ones((erosion_radius, erosion_radius), np.uint8))
+        
+        # Create transformation grid
+        theta = inverse_affine.reshape(1, 2, 3)
+        grid = F.affine_grid(theta, (1, 3, h_up, w_up), align_corners=False)
+        
+        # Warp face using grid sample
+        face_t = face_t.permute(2, 0, 1).unsqueeze(0)
+        inv_restored = F.grid_sample(face_t, grid, align_corners=False, mode='bilinear')[0].permute(1, 2, 0)
+        
+        # Create and transform mask
+        mask = torch.ones((self.face_size[1], self.face_size[0]), device=self.device)
+        mask_t = mask.unsqueeze(0).unsqueeze(0)
+        inv_mask = F.grid_sample(mask_t, grid, align_corners=False, mode='bilinear')[0, 0]
+        
+        # Erosion using max pooling approximation
+        pool_size = int(2 * self.upscale_factor)
+        inv_mask_erosion = -F.max_pool2d(-inv_mask.unsqueeze(0).unsqueeze(0), 
+                                        kernel_size=pool_size, 
+                                        stride=1, 
+                                        padding=pool_size//2)[0, 0]
+        
+        # Compute blending mask
+        total_face_area = inv_mask_erosion.sum()
+        w_edge = int(total_face_area.sqrt().item()) // 20
         blur_size = w_edge * 2
-        inv_soft_mask = cv2.GaussianBlur(inv_mask_center, (blur_size + 1, blur_size + 1), 0)
-        inv_soft_mask = inv_soft_mask[:, :, None]
-        upsample_img = inv_soft_mask * pasted_face + (1 - inv_soft_mask) * upsample_img
-        if np.max(upsample_img) > 256:
-            upsample_img = upsample_img.astype(np.uint16)
-        else:
-            upsample_img = upsample_img.astype(np.uint8)
-        return upsample_img
+        if blur_size % 2 == 0:
+            blur_size += 1
+            
+        # Gaussian blur using separable convolution
+        sigma = blur_size / 3
+        kernel_size = blur_size
+        kernel = torch.arange(kernel_size, device=self.device) - (kernel_size - 1) / 2
+        kernel = torch.exp(-kernel**2 / (2 * sigma**2))
+        kernel = kernel / kernel.sum()
+        
+        # Ensure proper padding for maintaining size
+        padding = kernel_size // 2
+        inv_mask_center = inv_mask_erosion.unsqueeze(0).unsqueeze(0)
+        inv_soft_mask = F.conv2d(inv_mask_center, 
+                                kernel.view(1, 1, -1, 1), 
+                                padding=(padding, 0))
+        inv_soft_mask = F.conv2d(inv_soft_mask, 
+                                kernel.view(1, 1, 1, -1), 
+                                padding=(0, padding))
+        
+        # Ensure mask has correct dimensions
+        inv_soft_mask = inv_soft_mask[0, 0]
+        
+        # Add channel dimension and ensure shapes match
+        inv_soft_mask = inv_soft_mask.unsqueeze(-1).expand(-1, -1, 3)
+        
+        # Ensure all tensors have the same shape
+        if inv_soft_mask.shape != inv_restored.shape:
+            inv_soft_mask = F.interpolate(
+                inv_soft_mask.permute(2, 0, 1).unsqueeze(0),
+                size=inv_restored.shape[:2],
+                mode='bilinear',
+                align_corners=False
+            ).squeeze(0).permute(1, 2, 0)
+        
+        # Final blending with shape checking
+        result = inv_soft_mask * inv_restored + (1 - inv_soft_mask) * upsample_img_t
+        
+        # Convert back to numpy and ensure proper type
+        result = result.clamp(0, 255).cpu().numpy().astype(np.uint8)
+        return result
 
 
 class laplacianSmooth:
