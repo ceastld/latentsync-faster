@@ -1,5 +1,6 @@
 # Adapted from https://github.com/guoyww/AnimateDiff/blob/main/animatediff/pipelines/pipeline_animation.py
 
+from dataclasses import dataclass
 import inspect
 import os
 import shutil
@@ -39,6 +40,15 @@ import soundfile as sf
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
+@dataclass
+class InitializedParams:
+    batch_size: int
+    device: str
+    height: int
+    width: int
+    do_classifier_free_guidance: bool
+    num_frames: int
+    num_channels_latents: int
 
 class LipsyncPipeline(DiffusionPipeline):
     _optional_components = []
@@ -107,10 +117,12 @@ class LipsyncPipeline(DiffusionPipeline):
             new_config["sample_size"] = 64
             unet._internal_dict = FrozenDict(new_config)
 
+        self.unet  = unet # for code compilation
+        self.audio_encoder = audio_encoder # for code compilation
+        self.vae = vae # for code compilation
+        self.scheduler = scheduler # for code compilation
         unet = torch.compile(unet, mode="reduce-overhead", fullgraph=True)
-        # audio_encoder = torch.compile(audio_encoder)
         vae = torch.compile(vae, mode="reduce-overhead", fullgraph=True)
-        # scheduler = torch.compile(scheduler)
 
         self.register_modules(
             vae=vae,
@@ -420,7 +432,7 @@ class LipsyncPipeline(DiffusionPipeline):
             # Check if audio features have ended
             audio_last_batch = False
             if whisper_feature is not None:
-                start_idx = batch_idx * params["num_frames"]
+                start_idx = batch_idx * params.num_frames
                 if start_idx >= total_audio_chunks - len(faces):
                     audio_last_batch = True
                     
@@ -569,8 +581,7 @@ class LipsyncPipeline(DiffusionPipeline):
             return None
             
         # Split audio features in batches of size num_frames
-        batch_size = params["num_frames"]
-        start_idx = batch_idx * batch_size
+        start_idx = batch_idx * params.num_frames
         
         # Calculate feature count using actual frame count for the batch
         chunks = self.audio_encoder.feature2chunks(
@@ -591,7 +602,7 @@ class LipsyncPipeline(DiffusionPipeline):
             else:
                 # If no valid features, create zero-filled features
                 selected_chunks.append(torch.zeros_like(chunks[0]) if len(chunks) > 0 else 
-                                      torch.zeros((1, params["num_channels_latents"])))
+                                      torch.zeros((1, params.num_channels_latents)))
         
         return selected_chunks
         
@@ -605,11 +616,11 @@ class LipsyncPipeline(DiffusionPipeline):
         latents_start = time.time()
         batch_size = 1  # Single batch processing
         num_frames = len(faces)
-        num_channels_latents = params["num_channels_latents"]
-        height = params["height"]
-        width = params["width"]
-        device = params["device"]
-        do_classifier_free_guidance = params["do_classifier_free_guidance"]
+        num_channels_latents = params.num_channels_latents
+        height = params.height
+        width = params.width
+        device = params.device
+        do_classifier_free_guidance = params.do_classifier_free_guidance
         
         latents = self.prepare_latents(
             batch_size,
@@ -857,15 +868,15 @@ class LipsyncPipeline(DiffusionPipeline):
         # Determine whether to use classifier-free guidance
         do_classifier_free_guidance = guidance_scale > 1.0
         
-        # Return prepared parameters
+        # Return prepared parameters using InitializedParams dataclass
         num_channels_latents = self.vae.config.latent_channels
         
-        return {
-            "batch_size": batch_size,
-            "device": device,
-            "height": height,
-            "width": width,
-            "do_classifier_free_guidance": do_classifier_free_guidance,
-            "num_frames": num_frames,
-            "num_channels_latents": num_channels_latents,
-        }
+        return InitializedParams(
+            batch_size=batch_size,
+            device=device,
+            height=height,
+            width=width,
+            do_classifier_free_guidance=do_classifier_free_guidance,
+            num_frames=num_frames,
+            num_channels_latents=num_channels_latents,
+        )
