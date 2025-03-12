@@ -134,6 +134,29 @@ class Audio2Feature:
 
         return audio_feat
 
+    def samples2feat(self, audio_samples):
+        """
+        Convert audio samples directly to features using Whisper model
+        
+        Args:
+            audio_samples: Audio samples array, expected to be properly formatted for Whisper model
+            
+        Returns:
+            torch.Tensor: Audio features extracted by Whisper model
+        """
+        result = self.model.transcribe(audio_samples)
+        embed_list = []
+        for emb in result["segments"]:
+            encoder_embeddings = emb["encoder_embeddings"]
+            encoder_embeddings = encoder_embeddings.transpose(0, 2, 1, 3)
+            encoder_embeddings = encoder_embeddings.squeeze(0)
+            start_idx = int(emb["start"])
+            end_idx = int(emb["end"])
+            emb_end_idx = int((end_idx - start_idx) / 2)
+            embed_list.append(encoder_embeddings[:emb_end_idx])
+        concatenated_array = torch.from_numpy(np.concatenate(embed_list, axis=0))
+        return concatenated_array
+
     def crop_overlap_audio_window(self, audio_feat, start_index):
         selected_feature_list = []
         for i in range(start_index, start_index + self.num_frames):

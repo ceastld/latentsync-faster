@@ -324,6 +324,7 @@ class LipsyncPipeline(DiffusionPipeline):
         out_frames = []
         print(f"Restoring {len(metadata_list)} faces...")
         for metadata in tqdm.tqdm(metadata_list):
+            metadata: LipsyncMetadata
             x1, y1, x2, y2 = metadata.box
             height = int(y2 - y1)
             width = int(x2 - x1)
@@ -494,10 +495,10 @@ class LipsyncPipeline(DiffusionPipeline):
             batch_times.append(batch_time)
             
             # Output batch step times
-            print(f"Batch {batch_idx+1} processing completed, total time: {batch_time:.2f} seconds")
-            print("   Step times:")
-            for step, step_time in batch_step_times[batch_idx].items():
-                print(f"  - {step}: {step_time:.2f} seconds")
+            # print(f"Batch {batch_idx+1} processing completed, total time: {batch_time:.2f} seconds")
+            # print("   Step times:")
+            # for step, step_time in batch_step_times[batch_idx].items():
+            #     print(f"  - {step}: {step_time:.2f} seconds")
             
             batch_idx += 1
             
@@ -571,6 +572,16 @@ class LipsyncPipeline(DiffusionPipeline):
             frames.append(frame)
             
         return frames, is_last_batch
+    
+    def _preprocess_face(self, frame: np.ndarray) -> Optional[LipsyncMetadata]:
+        face, box, affine_matrix = self.image_processor.affine_transform(frame)
+        # 创建LipsyncMetadata对象存储处理结果
+        return LipsyncMetadata(
+            face=face,
+            box=box,
+            affine_matrice=affine_matrix,
+            original_frame=frame
+        )
         
     def _preprocess_face_batch(self, frames: List[np.ndarray]) -> Optional[List[LipsyncMetadata]]:
         """Process a batch of frames for facial preprocessing, using the same face alignment logic as the original method"""
@@ -583,15 +594,7 @@ class LipsyncPipeline(DiffusionPipeline):
         # Use the same preprocessing logic as original code
         for frame in frames:
             try:
-                # Use the same processing logic as the original affine_transform_video
-                face, box, affine_matrix = self.image_processor.affine_transform(frame)
-                # 创建LipsyncMetadata对象存储处理结果
-                metadata = LipsyncMetadata(
-                    face=face,
-                    box=box,
-                    affine_matrice=affine_matrix,
-                    original_frame=frame
-                )
+                metadata = self._preprocess_face(frame)
                 metadata_list.append(metadata)
             except Exception as e:
                 print(f"Face preprocessing failed: {e}")
