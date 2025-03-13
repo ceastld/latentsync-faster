@@ -22,12 +22,11 @@ from configs.config import GLOBAL_CONFIG
 
 @dataclass
 class LipsyncContext:
-    config = GLOBAL_CONFIG.unet_config
     audio_sample_rate: int = 16000
     video_fps: int = 25
-    num_frames: int = config.data.num_frames
-    height: int = config.data.resolution
-    width: int = config.data.resolution
+    num_frames: int = 8
+    height: int = 256
+    width: int = 256
     num_inference_steps: int = 3
     guidance_scale: float = 1.5
     weight_type: str = torch.float16
@@ -52,7 +51,7 @@ class LipsyncContext:
         )
 
 
-def get_lipsync_pipeline(dtype, device) -> LipsyncPipeline:
+def get_lipsync_pipeline(dtype, device, use_compile=False) -> LipsyncPipeline:
     check_ffmpeg_installed()
 
     config = GLOBAL_CONFIG.unet_config
@@ -87,6 +86,7 @@ def get_lipsync_pipeline(dtype, device) -> LipsyncPipeline:
         audio_encoder=audio_encoder,
         unet=unet,
         scheduler=scheduler,
+        use_compile=use_compile,
     ).to(device)
 
     pipeline.unet.eval()

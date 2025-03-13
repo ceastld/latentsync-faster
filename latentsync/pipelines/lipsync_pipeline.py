@@ -233,10 +233,10 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
             batch_times.append(batch_time)
             
             # Output batch step times
-            # print(f"Batch {batch_idx+1} processing completed, total time: {batch_time:.2f} seconds")
-            # print("   Step times:")
-            # for step, step_time in batch_step_times[batch_idx].items():
-            #     print(f"  - {step}: {step_time:.2f} seconds")
+            print(f"Batch {batch_idx+1} processing completed, total time: {batch_time:.2f} seconds")
+            print("   Step times:")
+            for step, step_time in batch_step_times[batch_idx].items():
+                print(f"  - {step}: {step_time:.2f} seconds")
             
             batch_idx += 1
             

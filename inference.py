@@ -1,4 +1,5 @@
 import argparse
+import warnings
 
 import torch
 from configs.config import GLOBAL_CONFIG
@@ -14,7 +15,7 @@ def main(args):
     )
     dtype = torch.float16 if is_fp16_supported else torch.float32
 
-    pipeline = get_lipsync_pipeline(dtype, "cuda")
+    pipeline = get_lipsync_pipeline(dtype, "cuda", use_compile=False)
     config = GLOBAL_CONFIG.unet_config
 
     pipeline(
@@ -47,6 +48,7 @@ if __name__ == "__main__":
     parser.add_argument("--guidance_scale", type=float, default=1.5)
     parser.add_argument("--seed", type=int, default=1247)
     args = parser.parse_args()
+    warnings.filterwarnings("ignore", message="Initializer .*")
 
     main(args)
 

@@ -115,8 +115,8 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         self.vae = vae # for code compilation
         self.scheduler = scheduler # for code compilation
         if use_compile:
-            unet = torch.compile(unet, mode="reduce-overhead", fullgraph=True)
             vae = torch.compile(vae, mode="reduce-overhead", fullgraph=True)
+            unet = torch.compile(unet, mode="reduce-overhead", fullgraph=True)
 
         self.register_modules(
             vae=vae,
@@ -581,7 +581,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
     def _initialize_parameters(self, num_frames, height, width, mask, guidance_scale, callback_steps):
         """Initialize and validate parameters needed for inference"""
         # Simplified version, may need to check other conditions in actual use
-        num_frames = 8  # Hardcoded value from original code
+        # num_frames = 8  # Hardcoded value from original code
         batch_size = 1
         device = self._execution_device
         self.image_processor = ImageProcessor(height, mask=mask, device="cuda")
