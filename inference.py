@@ -2,17 +2,22 @@ import argparse
 
 import torch
 from configs.config import GLOBAL_CONFIG
-from latentsync.inference.lipsync_model import LipsyncModel
+from latentsync.inference.lipsync_model import get_lipsync_pipeline
 from accelerate.utils import set_seed
 
 
 def main(args):
     print(f"Input video path: {args.video_path}")
     print(f"Input audio path: {args.audio_path}")
+    is_fp16_supported = (
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] > 7
+    )
+    dtype = torch.float16 if is_fp16_supported else torch.float32
 
-    model = LipsyncModel()
+    pipeline = get_lipsync_pipeline(dtype, "cuda")
     config = GLOBAL_CONFIG.unet_config
-    model.pipeline(
+
+    pipeline(
         video_path=args.video_path,
         audio_path=args.audio_path,
         video_out_path=args.video_out_path,
@@ -20,10 +25,11 @@ def main(args):
         num_frames=config.data.num_frames,
         num_inference_steps=args.inference_steps,
         guidance_scale=args.guidance_scale,
-        weight_dtype=model.dtype,
+        weight_dtype=dtype,
         width=config.data.resolution,
         height=config.data.resolution,
     )
+    
     if args.seed != -1:
         set_seed(args.seed)
     else:
