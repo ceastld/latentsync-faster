@@ -220,3 +220,51 @@ class LipsyncModel:
         output_frames = self.pipeline.restore_video(updated_metadata)
 
         return output_frames
+    
+    @torch.no_grad()
+    def process_video(self, video_frames: List[np.ndarray], audio_samples: np.ndarray):
+        """Process a video with corresponding audio samples."""
+        assert self.lipsync_context is not None
+        
+        # 1. Process audio samples
+        audio_features = self.process_audio(audio_samples, len(video_frames))
+        
+        # 2. Define batch size based on context
+        batch_size = self.lipsync_context.num_frames
+        
+        # 3. Process video frames in batches
+        for i in range(0, len(video_frames), batch_size):
+            # Get current batch of frames
+            batch_frames = video_frames[i:i+batch_size]
+            
+            # Get corresponding audio features for this batch
+            batch_audio_features = audio_features[i:i+batch_size] if audio_features else None
+            
+            # Preprocess frames to get metadata
+            metadata_list = []
+            for frame in batch_frames:
+                try:
+                    # Process each frame to get face metadata
+                    metadata = self.process_frame(frame)
+                    metadata_list.append(metadata)
+                except Exception as e:
+                    print(f"Face preprocessing failed: {e}")
+                    # If processing fails and there are other successfully processed frames, use the previous frame's result
+                    if len(metadata_list) > 0:
+                        metadata_list.append(metadata_list[-1])
+                    # Otherwise skip this frame (this should be handled better in production)
+            
+            # Skip batch if no faces were detected
+            if not metadata_list:
+                print(f"No faces detected in batch {i//batch_size + 1}")
+                continue
+                
+            # Process the batch
+            batch_output_frames = self.process_batch(metadata_list, batch_audio_features)
+            
+            # Add processed frames to output
+            for frame in batch_output_frames:
+                yield frame
+            
+            print(f"Processed batch {i//batch_size + 1}/{(len(video_frames) + batch_size - 1) // batch_size}")
+        

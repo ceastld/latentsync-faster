@@ -30,9 +30,8 @@ def run_inference(video_path: str, audio_path: str, output_path: str):
         mode="constant",
     )
 
-    # Process audio in chunks of 25 frames and concatenate
     audio_features = []
-    audio_processing_batch_size = 25
+    audio_processing_batch_size = 16
     total_audio_frames = int(num_audio_clips)
     
     for i in range(0, total_audio_frames, audio_processing_batch_size):
@@ -96,6 +95,6 @@ if __name__ == "__main__":
     # Example usage
     video_path = "assets/obama.mp4"
     audio_path = "assets/cxk.mp3"
-    output_path = "video_out+audio_batch_size=25.mp4"
+    output_path = "video_out+audio_batch_size=16.mp4"
 
     run_inference(video_path, audio_path, output_path)

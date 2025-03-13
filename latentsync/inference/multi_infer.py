@@ -7,7 +7,6 @@ from tqdm import tqdm
 import time
 import torch
 import asyncio
-import asyncio
 import warnings
 import logging
 
@@ -23,7 +22,6 @@ class InferenceWorker:
         self.num_workers = num_workers
         self.task_start_counter = Value("i", 0)
         self.task_wait_counter = Value("i", 0)
-        pass
 
     def infer_task(self, model, input_data):
         """
@@ -32,7 +30,6 @@ class InferenceWorker:
         :param input_data: The input data for inference.
         :return: The inference result, should be a dictionary.
         """
-        model, input_data
         raise NotImplementedError("Subclasses must implement this method.")
 
     def _set_result(self, idx, result: np.ndarray):
@@ -72,8 +69,6 @@ class InferenceWorker:
         while self.is_alive() or len(self.results) > 0:
             result = await self.wait_one_result()
             yield result
-        # for k in sorted(self.results.keys()):
-        #     yield self.results[k]
 
     async def wait_for_results(self, count: int, pbar: tqdm = None, remove=True):
         """
@@ -141,13 +136,15 @@ class InferenceWorker:
 
 
 class MultiThreadInference(InferenceWorker):
+    """
+    Multi-threaded inference worker class.
+    Note: This class is not fully implemented yet.
+    """
     def __init__(self, num_workers=1, worker_timeout=60):
-        super().__init__(worker_timeout)
-        self.num_workers = num_workers
+        super().__init__(num_workers=num_workers, worker_timeout=worker_timeout)
 
 
 class MultiProcessInference(InferenceWorker):
-    mp.set_start_method("spawn", force=True)  # Use 'spawn' start method for CUDA.
     warnings.filterwarnings("ignore", category=FutureWarning)
     logger = logging.getLogger("MultiProcessInference")
     def __init__(self, num_workers=1, worker_timeout=60):
@@ -157,7 +154,12 @@ class MultiProcessInference(InferenceWorker):
         :param num_processes: Number of processes to spawn.
         :param worker_timeout: Timeout for worker processes, in seconds.
         """
-        super().__init__(num_workers=num_workers,worker_timeout=worker_timeout)
+        try:
+            mp.set_start_method("spawn", force=False)  # Use 'spawn' start method for CUDA.
+        except RuntimeError:
+            # 如果已经设置过启动方法，则忽略
+            pass
+        super().__init__(num_workers=num_workers, worker_timeout=worker_timeout)
         self.worker_list: List[mp.Process] = []
         self.worker_loaded_count = Value("i", 0)
         self.worker_loaded_event = mp.Event()
@@ -172,7 +174,8 @@ class MultiProcessInference(InferenceWorker):
         if self.worker_loaded_count.value > 0:
             return True
         loaded = self.worker_loaded_event.wait(timeout=timeout)
-        print("Worker Loaded")
+        if loaded:
+            self.logger.info("Worker Loaded")
         return loaded
     
     def process_task(self, model, idx, input_data):
@@ -227,8 +230,7 @@ class MultiProcessInference(InferenceWorker):
 
     def stop_workers(self):
         # Send stop signals to workers (None as a sentinel value).
-        for _ in range(self.num_workers):
-            self.task_queue.put((None, None))  # Sentinel to stop workers
+        self.add_end_task()
         # Wait for all processes to finish.
         for p in self.worker_list:
             p.terminate()
@@ -255,7 +257,6 @@ class AsyncWorker(InferenceWorker):
             self.task = None
 
     def is_alive(self):
-        # return True
         return self.task is not None and not self.task.done()
 
 
@@ -280,7 +281,7 @@ class CustomInference(MultiProcessInference):
 
 
 async def main():
-    mp.set_start_method("spawn", force=True)  # Use 'spawn' start method for CUDA.
+    # mp.set_start_method("spawn", force=True) 已在 MultiProcessInference 类中设置
     model = torch.nn.Linear(10, 1).cuda()  # Example model moved to CUDA.
     # Generate 100 tasks, each with "input" data and "meta" information.
     tasks = [{"input": torch.randn(1, 10), "meta": f"task-{i}"} for i in range(50)]
