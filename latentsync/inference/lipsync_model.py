@@ -17,11 +17,12 @@ from configs.config import GLOBAL_CONFIG
 
 @dataclass
 class LipsyncContext:
+    config = GLOBAL_CONFIG.unet_config
     audio_sample_rate: int = 16000
     video_fps: int = 25
-    num_frames: int = 8
-    height: int = 512
-    width: int = 512
+    num_frames: int = config.data.num_frames
+    height: int = config.data.resolution
+    width: int = config.data.resolution
     num_inference_steps: int = 3
     guidance_scale: float = 1.5
     weight_type: str = torch.float16
