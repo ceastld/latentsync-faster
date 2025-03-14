@@ -100,7 +100,6 @@ def video_stream(video_path):
         yield cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     cap.release()
 
-
 def cycle_video_stream(video_path, max_frames):
     cap = cv2.VideoCapture(video_path)
     idx = 0

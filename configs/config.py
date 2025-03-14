@@ -1,6 +1,6 @@
 from functools import cached_property
 import os
-
+import torch
 from omegaconf import OmegaConf
 from pathlib import Path
 
@@ -30,6 +30,27 @@ class Config:
     @cached_property
     def latentsync_unet_path(self):
         return os.path.join(self.checkpoint_dir, "latentsync_unet.pt")
+    
+    @cached_property
+    def lipsync(self):
+        return LipsyncConfig()
+
+class LipsyncConfig:
+    # Audio and video parameters
+    audio_sample_rate = 16000
+    video_fps = 25
+    
+    # Frame parameters
+    num_frames = 8 # batch size
+    height = 256
+    width = 256
+    
+    # Diffusion parameters
+    num_inference_steps = 3
+    guidance_scale = 1.5
+    weight_type = torch.float16
+    eta = 0.0
+    mask = "fix_mask"
 
 GLOBAL_CONFIG = Config()
 
