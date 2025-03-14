@@ -50,7 +50,7 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
     def init_with_context(self, context: LipsyncContext):
         """Initialize pipeline parameters with context"""
         # Initialize basic parameters
-        self._initialize_parameters(context)
+        super().init_with_context(context)
 
         # Set video fps
         self.video_fps = context.video_fps
@@ -60,12 +60,11 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
             context.generator, context.eta
         )
 
+        # Set progress bar config
+        self.set_progress_bar_config(desc=f"Sample frames: {context.num_frames}")
+
         return self
 
-    def _initialize_parameters(self, context: LipsyncContext):
-        self.set_progress_bar_config(desc=f"Sample frames: {context.num_frames}")
-        return super()._initialize_parameters(context)
-    
     def _prepare_audio_batch(self, whisper_feature: Optional[torch.Tensor], batch_idx: int, 
                            num_frames_in_batch: int, context: LipsyncContext) -> Optional[List[torch.Tensor]]:
         """Prepare audio features for the current batch"""

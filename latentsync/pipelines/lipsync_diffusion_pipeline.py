@@ -566,7 +566,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
         return video_out_path
 
-    def _initialize_parameters(self, context: LipsyncContext):
+    def init_with_context(self, context: LipsyncContext):
         """Initialize and validate parameters needed for inference"""
         # Get device
         device = self._execution_device
@@ -584,3 +584,5 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         # Update context with device and num_channels_latents
         context.device = device
         context.num_channels_latents = self.vae.config.latent_channels
+        
+        return self
