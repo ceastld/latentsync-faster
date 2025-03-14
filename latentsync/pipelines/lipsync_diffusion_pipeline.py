@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import time
 from typing import Callable, List, Optional, Union
+from ..utils.timer import Timer
 
 
 @dataclass
@@ -145,17 +146,11 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
                 return torch.device(module._hf_hook.execution_device)
         return self.device
 
+    @Timer(name="decode_latents")
     def decode_latents(self, latents):
-        t0 = time.time()
         latents = latents / self.vae.config.scaling_factor + self.vae.config.shift_factor
-        t1 = time.time()
         latents = rearrange(latents, "b c f h w -> (b f) c h w")
-        t2 = time.time()
         decoded_latents = self.vae.decode(latents).sample
-        t3 = time.time()
-        
-        print(f"[Decode latents] Scaling: {(t1-t0)*1000:.2f}ms, Rearrange: {(t2-t1)*1000:.2f}ms, VAE decode: {(t3-t2)*1000:.2f}ms")
-        
         return decoded_latents
 
     def prepare_extra_step_kwargs(self, generator, eta):
@@ -189,6 +184,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
                 f" {type(callback_steps)}."
             )
 
+    @Timer(name="prepare_latents")
     def prepare_latents(self, context: LipsyncContext, num_frames: int):
         """Prepare latent variables for diffusion"""
         shape = (
@@ -206,6 +202,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         latents = latents * self.scheduler.init_noise_sigma
         return latents
 
+    @Timer(name="prepare_mask_latents")
     def prepare_mask_latents(self, context: LipsyncContext, mask: torch.Tensor, masked_image: torch.Tensor):
         """Prepare mask latent variables"""
         # resize the mask to latents shape as we concatenate the mask to the latents
@@ -234,6 +231,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         )
         return mask, masked_image_latents
 
+    @Timer(name="prepare_image_latents")
     def prepare_image_latents(self, context: LipsyncContext, images: torch.Tensor):
         """Prepare image latent variables"""
         images = images.to(device=context.device, dtype=context.weight_dtype)
@@ -250,18 +248,12 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         self._progress_bar_config.update(kwargs)
 
     @staticmethod
+    @Timer(name="paste_surrounding_pixels")
     def paste_surrounding_pixels_back(decoded_latents, pixel_values, masks, device, weight_dtype):
         # Paste the surrounding pixels back, because we only want to change the mouth region
-        t0 = time.time()
         pixel_values = pixel_values.to(device=device, dtype=weight_dtype)
-        t1 = time.time()
         masks = masks.to(device=device, dtype=weight_dtype)
-        t2 = time.time()
         combined_pixel_values = decoded_latents * masks + pixel_values * (1 - masks)
-        t3 = time.time()
-        
-        print(f"[Paste pixels] Move pixel values to device: {(t1-t0)*1000:.2f}ms, Move masks to device: {(t2-t1)*1000:.2f}ms, Combine pixels: {(t3-t2)*1000:.2f}ms")
-        
         return combined_pixel_values
 
     @staticmethod
@@ -396,30 +388,44 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
         return metadata_list
 
+    @Timer(name="denoising_step")
+    def _denoising_step(self, latents, t, audio_embeds, mask_latents, masked_image_latents, image_latents, context):
+        """执行单个降噪步骤"""
+        # Prepare model input
+        latent_model_input = torch.cat([latents] * 2) if context.do_classifier_free_guidance else latents
+        latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+        latent_model_input = torch.cat(
+            [latent_model_input, mask_latents, masked_image_latents, image_latents], dim=1
+        )
 
+        # Predict noise residual
+        noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=audio_embeds).sample
+
+        # Apply guidance
+        if context.do_classifier_free_guidance:
+            noise_pred_uncond, noise_pred_audio = noise_pred.chunk(2)
+            noise_pred = noise_pred_uncond + context.guidance_scale * (noise_pred_audio - noise_pred_uncond)
+
+        # Calculate previous noise sample x_t -> x_t-1
+        latents = self.scheduler.step(noise_pred, t, latents, **context.extra_step_kwargs).prev_sample
+        
+        return latents
+
+    @Timer(name="run_diffusion_batch")
     def _run_diffusion_batch(self, faces: torch.Tensor, audio_features: Optional[List[torch.Tensor]],
                           context: LipsyncContext) -> tuple[torch.Tensor, dict]:
         """Run diffusion inference on a single batch"""
         """Core function for diffusion_processor"""
-        step_times: dict = {}  # Record time for each step
-
+        
         # 1. Prepare latent variables
-        latents_start = time.time()
         num_frames = len(faces)
-
         latents = self.prepare_latents(context, num_frames)
-        latents_end = time.time()
-        step_times["Prepare latent variables"] = latents_end - latents_start
 
         # 2. Set timesteps
-        timesteps_start = time.time()
         self.scheduler.set_timesteps(context.num_inference_steps, device=context.device)
         timesteps = self.scheduler.timesteps
-        timesteps_end = time.time()
-        step_times["Set timesteps"] = timesteps_end - timesteps_start
 
         # 3. Prepare audio embeddings
-        audio_start = time.time()
         if self.unet.add_audio_layer and audio_features is not None:
             audio_embeds = torch.stack(audio_features)
             audio_embeds = audio_embeds.to(context.device, dtype=context.weight_dtype)
@@ -428,62 +434,35 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
                 audio_embeds = torch.cat([null_audio_embeds, audio_embeds])
         else:
             audio_embeds = None
-        audio_end = time.time()
-        step_times["Prepare audio embeddings"] = audio_end - audio_start
 
         # 4. Prepare face masks
-        mask_prep_start = time.time()
         pixel_values, masked_pixel_values, masks = self.image_processor.prepare_masks_and_masked_images(
             faces, affine_transform=False
         )
-        mask_prep_end = time.time()
-        step_times["Prepare face masks"] = mask_prep_end - mask_prep_start
 
         # 5. Prepare mask latent variables
-        mask_latents_start = time.time()
         mask_latents, masked_image_latents = self.prepare_mask_latents(
             context,
             masks,
             masked_pixel_values,
         )
-        mask_latents_end = time.time()
-        step_times["Prepare mask latent variables"] = mask_latents_end - mask_latents_start
 
         # 6. Prepare image latent variables
-        image_latents_start = time.time()
         image_latents = self.prepare_image_latents(
             context,
             pixel_values,
         )
-        image_latents_end = time.time()
-        step_times["Prepare image latent variables"] = image_latents_end - image_latents_start
 
         # 7. Perform denoising process
-        denoising_start = time.time()
         num_warmup_steps = len(timesteps) - context.num_inference_steps * self.scheduler.order
 
-        denoising_step_times = []
         with self.progress_bar(total=context.num_inference_steps) as progress_bar:
             for j, t in enumerate(timesteps):
-                step_start = time.time()
-
-                # Prepare model input
-                latent_model_input = torch.cat([latents] * 2) if context.do_classifier_free_guidance else latents
-                latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
-                latent_model_input = torch.cat(
-                    [latent_model_input, mask_latents, masked_image_latents, image_latents], dim=1
+                # Execute denoising step
+                latents = self._denoising_step(
+                    latents, t, audio_embeds, mask_latents, 
+                    masked_image_latents, image_latents, context
                 )
-
-                # Predict noise residual
-                noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=audio_embeds).sample
-
-                # Apply guidance
-                if context.do_classifier_free_guidance:
-                    noise_pred_uncond, noise_pred_audio = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + context.guidance_scale * (noise_pred_audio - noise_pred_uncond)
-
-                # Calculate previous noise sample x_t -> x_t-1
-                latents = self.scheduler.step(noise_pred, t, latents, **context.extra_step_kwargs).prev_sample
 
                 # Update progress bar and callback
                 if j == len(timesteps) - 1 or ((j + 1) > num_warmup_steps and (j + 1) % self.scheduler.order == 0):
@@ -491,37 +470,15 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
                     if context.callback is not None and j % context.callback_steps == 0:
                         context.callback(j, t, latents)
 
-                step_end = time.time()
-                denoising_step_times.append(step_end - step_start)
-
-        denoising_end = time.time()
-        step_times["Denoising process"] = denoising_end - denoising_start
-        step_times["Average denoising per step"] = sum(denoising_step_times) / len(denoising_step_times) if denoising_step_times else 0
-
         # 8. Decode latents
-        decode_start = time.time()
         decoded_latents = self.decode_latents(latents)
-        decode_end = time.time()
-        decode_time = decode_end - decode_start
-        step_times["Decode latents"] = decode_time
-        print(f"[Timing] Total decode latents time: {decode_time*1000:.2f}ms")
 
         # 9. Post-process (paste surrounding pixels back)
-        postprocess_start = time.time()
         decoded_latents = self.paste_surrounding_pixels_back(
             decoded_latents, pixel_values, 1 - masks, context.device, context.weight_dtype
         )
-        postprocess_end = time.time()
-        postprocess_time = postprocess_end - postprocess_start
-        step_times["Paste surrounding pixels"] = postprocess_time
-        print(f"[Timing] Total paste surrounding pixels time: {postprocess_time*1000:.2f}ms")
 
-        # Total decode and post-process time (for backward compatibility)
-        total_time = decode_time + postprocess_time
-        step_times["Decode and post-process"] = total_time
-        print(f"[Timing] Combined decode and post-process time: {total_time*1000:.2f}ms")
-
-        return decoded_latents, step_times
+        return decoded_latents, {}
 
     def _restore_and_save_stream(self, metadata_list_all: List[List[LipsyncMetadata]],
                                audio_samples: torch.Tensor, video_fps: int,

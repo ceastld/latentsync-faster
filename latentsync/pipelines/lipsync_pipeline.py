@@ -2,8 +2,14 @@
 
 from typing import Callable, List, Optional, Tuple, Union
 import time
+import os
+import shutil
+import subprocess
 
 import torch
+import cv2
+import numpy as np
+import soundfile as sf
 
 
 from diffusers.models import AutoencoderKL
@@ -21,8 +27,9 @@ from latentsync.pipelines.lipsync_diffusion_pipeline import LipsyncDiffusionPipe
 from latentsync.pipelines.lipsync_diffusion_pipeline import LipsyncMetadata
 
 from ..models.unet import UNet3DConditionModel
-from ..utils.util import read_audio, check_ffmpeg_installed
+from ..utils.util import read_audio, check_ffmpeg_installed, write_video
 from ..whisper.audio2feature import Audio2Feature
+from ..utils.timer import Timer
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -47,6 +54,7 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         self.register_modules(audio_encoder=audio_encoder)
         self.set_progress_bar_config(desc="Steps")
 
+    @Timer(name="init_with_context")
     def init_with_context(self, context: LipsyncContext):
         """Initialize pipeline parameters with context"""
         # Initialize basic parameters
@@ -65,10 +73,10 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
 
         return self
 
+    @Timer(name="prepare_audio_batch")
     def _prepare_audio_batch(self, whisper_feature: Optional[torch.Tensor], batch_idx: int, 
                            num_frames_in_batch: int, context: LipsyncContext) -> Optional[List[torch.Tensor]]:
         """Prepare audio features for the current batch"""
-        """NOT the core function for audio_processor. Need further work for stream processing"""
         if not self.unet.add_audio_layer or whisper_feature is None:
             return None
             
@@ -97,7 +105,143 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
                                       torch.zeros((1, context.num_channels_latents)))
         
         return selected_chunks
+
+    @Timer(name="process_batch")
+    def _process_batch(self, frames: List[np.ndarray], whisper_feature: Optional[torch.Tensor], 
+                      batch_idx: int, context: LipsyncContext) -> Optional[List[LipsyncMetadata]]:
+        """Process a single batch of frames"""
+        # 1. Facial preprocessing
+        metadata_list = self._preprocess_face_batch(frames)
         
+        if metadata_list is None:
+            print(f"Batch {batch_idx+1} No valid face detected, skipping")
+            return None
+            
+        # 从metadata中提取处理后的人脸图像，用于后续处理
+        faces = torch.stack([metadata.face for metadata in metadata_list])
+        
+        # 2. Prepare audio features for the current batch
+        current_audio_features = self._prepare_audio_batch(
+            whisper_feature, batch_idx, len(faces), context
+        )
+        
+        # 3. Run diffusion inference on the current batch
+        synced_faces_batch, _ = self._run_diffusion_batch(
+            faces, current_audio_features, context
+        )
+        
+        # 4. 更新metadata_list中的face字段，存储处理后的人脸
+        for i, metadata in enumerate(metadata_list):
+            # 创建一个新的LipsyncMetadata对象，包含原始数据和处理后的人脸
+            updated_metadata = LipsyncMetadata(
+                face=synced_faces_batch[i],  # 使用处理后的人脸
+                box=metadata.box,
+                affine_matrice=metadata.affine_matrice,
+                original_frame=metadata.original_frame
+            )
+            metadata_list[i] = updated_metadata
+            
+        return metadata_list
+        
+    @Timer(name="init_video_stream")
+    def _init_video_stream(self, video_path: str) -> tuple[cv2.VideoCapture, int]:
+        """Initialize video stream reading"""
+        # Open video file
+        video_capture = cv2.VideoCapture(video_path)
+        if not video_capture.isOpened():
+            raise ValueError(f"Cannot open video file: {video_path}")
+
+        # Get total frame count
+        total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        return video_capture, total_frames
+
+    @Timer(name="read_frame_batch")
+    def _read_frame_batch(self, video_capture: cv2.VideoCapture, batch_size: int) -> tuple[List[np.ndarray], bool]:
+        """Read a batch of video frames"""
+        frames: List[np.ndarray] = []
+        is_last_batch = False
+
+        for _ in range(batch_size):
+            ret, frame = video_capture.read()
+            if not ret:
+                is_last_batch = True
+                break
+
+            # Convert BGR to RGB
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frames.append(frame)
+
+        return frames, is_last_batch
+
+    @Timer(name="preprocess_face_batch")
+    def _preprocess_face_batch(self, frames: List[np.ndarray]) -> Optional[List[LipsyncMetadata]]:
+        """Process a batch of frames for facial preprocessing"""
+        if len(frames) == 0:
+            return None
+
+        metadata_list: List[LipsyncMetadata] = []
+
+        for frame in frames:
+            try:
+                metadata = self._preprocess_face(frame)
+                metadata_list.append(metadata)
+            except Exception as e:
+                print(f"Face preprocessing failed: {e}")
+                # If processing fails and there are other successfully processed frames, use the result of the previous frame
+                if len(metadata_list) > 0:
+                    metadata_list.append(metadata_list[-1])
+                # Otherwise skip this frame
+
+        if len(metadata_list) == 0:
+            return None
+
+        return metadata_list
+
+    @Timer(name="restore_and_save_stream")
+    def _restore_and_save_stream(self, metadata_list_all: List[List[LipsyncMetadata]],
+                               audio_samples: torch.Tensor, video_fps: int,
+                               audio_sample_rate: int, video_out_path: str) -> Optional[str]:
+        """Restore processed frames to original video and save"""
+        # Check if there are metadata
+        if not metadata_list_all:
+            print("No successfully processed frames, cannot restore video")
+            return None
+
+        print(f"Restoring video: Processed {len(metadata_list_all)} batches of data")
+
+        # 将所有批次的metadata列表合并为一个扁平列表
+        flat_metadata_list = []
+        for batch_metadata in metadata_list_all:
+            flat_metadata_list.extend(batch_metadata)
+
+        # 使用restore_video方法恢复视频
+        print(f"Restoring {len(flat_metadata_list)} frames of video...")
+        synced_video_frames = self.restore_video(flat_metadata_list)
+
+        # Process audio
+        audio_samples_remain_length = int(len(synced_video_frames) / video_fps * audio_sample_rate)
+        if audio_samples_remain_length > len(audio_samples):
+            print(f"Warning: Calculated audio length ({audio_samples_remain_length}) exceeds available audio samples ({len(audio_samples)}), audio will be truncated")
+            audio_samples_remain_length = len(audio_samples)
+
+        audio_samples = audio_samples[:audio_samples_remain_length].cpu().numpy()
+        print(f"Processed video length: {len(synced_video_frames)/video_fps:.2f} seconds, audio samples: {len(audio_samples)}")
+
+        # Save results
+        temp_dir = "temp"
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+        os.makedirs(temp_dir, exist_ok=True)
+
+        write_video(os.path.join(temp_dir, "video.mp4"), synced_video_frames, fps=video_fps)
+        sf.write(os.path.join(temp_dir, "audio.wav"), audio_samples, audio_sample_rate)
+
+        command = f"ffmpeg -y -loglevel error -nostdin -i {os.path.join(temp_dir, 'video.mp4')} -i {os.path.join(temp_dir, 'audio.wav')} -c:v libx264 -c:a aac -q:v 0 -q:a 0 {video_out_path}"
+        subprocess.run(command, shell=True)
+
+        return video_out_path
+
     @torch.no_grad()
     def __call__(
         self,
@@ -121,16 +265,9 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         check_ffmpeg_installed()
         self.init_with_context(context)
         
-        # Record total start time
-        total_start_time = time.time()
-        
         # Prepare audio features (process all audio at once)
         audio_samples = read_audio(audio_path)
-
-        audio_feature_start = time.time()
         whisper_feature = self.audio_encoder.audio2feat(audio_path) if self.unet.add_audio_layer else None
-        audio_feature_end = time.time()
-        print(f"Audio feature extraction completed, time: {audio_feature_end - audio_feature_start:.2f} seconds")
         
         # Initialize video stream reading
         video_capture, total_frames = self._init_video_stream(video_path)
@@ -147,8 +284,6 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         
         # Initialize result storage
         metadata_list_all = []  # 存储所有批次的metadata列表
-        batch_times = []
-        batch_step_times = {}  # Store time for each batch step
         
         # Start stream processing
         print(f"Starting stream processing video: {video_path}")
@@ -156,88 +291,26 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         
         batch_idx = 0
         while True:
-            batch_step_times[batch_idx] = {}
+            print(f"Processing batch {batch_idx+1}/{total_batches}")
             
-            # Record batch start time
-            batch_start_time = time.time()
-            
-            # 1. Read a batch of video frames
-            read_start = time.time()
+            # Read a batch of video frames
             frames, is_video_last_batch = self._read_frame_batch(video_capture, context.num_frames)
-            read_end = time.time()
-            batch_step_times[batch_idx]["Read frames"] = read_end - read_start
             
             if len(frames) == 0:
                 print("Video frames read completed, exiting processing")
                 break
                 
-            print(f"Processing batch {batch_idx+1}/{total_batches}, frame count: {len(frames)}")
-            
-            # 2. Facial preprocessing (single batch processing)
-            preprocess_start = time.time()
-            metadata_list = self._preprocess_face_batch(frames)
-            preprocess_end = time.time()
-            batch_step_times[batch_idx]["Facial preprocessing"] = preprocess_end - preprocess_start
-            
-            if metadata_list is None:
-                print(f"Batch {batch_idx+1} No valid face detected, skipping")
-                batch_idx += 1
-                continue
-                
-            # 从metadata中提取处理后的人脸图像，用于后续处理
-            faces = torch.stack([metadata.face for metadata in metadata_list])
-                
-            # Store metadata list for final restoration
-            metadata_list_all.append(metadata_list)
-            
-            # 3. Prepare audio features for the current batch
-            audio_start = time.time()
-            current_audio_features = self._prepare_audio_batch(
-                whisper_feature, batch_idx, len(faces), context
-            )
-            audio_end = time.time()
-            batch_step_times[batch_idx]["Audio feature preparation"] = audio_end - audio_start
+            # Process the batch
+            metadata_list = self._process_batch(frames, whisper_feature, batch_idx, context)
+            if metadata_list is not None:
+                metadata_list_all.append(metadata_list)
             
             # Check if audio features have ended
             audio_last_batch = False
             if whisper_feature is not None:
                 start_idx = batch_idx * context.num_frames
-                if start_idx >= total_audio_chunks - len(faces):
+                if start_idx >= total_audio_chunks - len(frames):
                     audio_last_batch = True
-                    
-            # 4. Run diffusion inference on the current batch
-            diffusion_start = time.time()
-            synced_faces_batch, diffusion_step_times = self._run_diffusion_batch(
-                faces, current_audio_features, context
-            )
-            diffusion_end = time.time()
-            batch_step_times[batch_idx]["Diffusion inference"] = diffusion_end - diffusion_start
-            
-            # Merge diffusion step time records
-            for step, step_time in diffusion_step_times.items():
-                batch_step_times[batch_idx][step] = step_time
-            
-            # 更新metadata_list中的face字段，存储处理后的人脸
-            for i, metadata in enumerate(metadata_list):
-                # 创建一个新的LipsyncMetadata对象，包含原始数据和处理后的人脸
-                updated_metadata = LipsyncMetadata(
-                    face=synced_faces_batch[i],  # 使用处理后的人脸
-                    box=metadata.box,
-                    affine_matrice=metadata.affine_matrice,
-                    original_frame=metadata.original_frame
-                )
-                metadata_list[i] = updated_metadata
-            
-            # Calculate and record batch processing time
-            batch_end_time = time.time()
-            batch_time = batch_end_time - batch_start_time
-            batch_times.append(batch_time)
-            
-            # Output batch step times
-            print(f"Batch {batch_idx+1} processing completed, total time: {batch_time:.2f} seconds")
-            print("   Step times:")
-            for step, step_time in batch_step_times[batch_idx].items():
-                print(f"      {step}: {step_time:.2f} seconds")
             
             batch_idx += 1
             
@@ -247,6 +320,9 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         
         # Close video capture
         video_capture.release()
+        
+        # Print timing statistics
+        Timer.print_stats()
         
         # Restore video frames and save results
         return self._restore_and_save_stream(
