@@ -6,8 +6,10 @@ from configs.config import GLOBAL_CONFIG
 from latentsync.inference.lipsync_model import get_lipsync_pipeline
 from accelerate.utils import set_seed
 
+from latentsync.utils.timer import Timer
 
 def main(args):
+    Timer.enable()
     print(f"Input video path: {args.video_path}")
     print(f"Input audio path: {args.audio_path}")
     is_fp16_supported = (
@@ -16,7 +18,7 @@ def main(args):
     dtype = torch.float16 if is_fp16_supported else torch.float32
 
     pipeline = get_lipsync_pipeline(dtype, "cuda", use_compile=False)
-    config = GLOBAL_CONFIG.unet_config
+    
     if args.seed != -1:
         set_seed(args.seed)
     else:
@@ -27,12 +29,9 @@ def main(args):
         audio_path=args.audio_path,
         video_out_path=args.video_out_path,
         video_mask_path=args.video_out_path.replace(".mp4", "_mask.mp4"),
-        num_frames=config.data.num_frames,
         num_inference_steps=args.inference_steps,
         guidance_scale=args.guidance_scale,
         weight_dtype=dtype,
-        width=config.data.resolution,
-        height=config.data.resolution,
     )
 
 

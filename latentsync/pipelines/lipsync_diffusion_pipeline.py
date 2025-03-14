@@ -152,7 +152,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         latents = rearrange(latents, "b c f h w -> (b f) c h w")
         decoded_latents = self.vae.decode(latents).sample
         return decoded_latents
-
+    
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
@@ -211,15 +211,13 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         mask = torch.nn.functional.interpolate(
             mask, size=(context.height // self.vae_scale_factor, context.width // self.vae_scale_factor)
         )
-        masked_image = masked_image.to(device=context.device, dtype=context.weight_dtype)
 
         # encode the mask image into latents space so we can concatenate it to the latents
         masked_image_latents = self.vae.encode(masked_image).latents
         masked_image_latents = (masked_image_latents - self.vae.config.shift_factor) * self.vae.config.scaling_factor
 
         # aligning device to prevent device errors when concating it with the latent model input
-        masked_image_latents = masked_image_latents.to(device=context.device, dtype=context.weight_dtype)
-        mask = mask.to(device=context.device, dtype=context.weight_dtype)
+        # masked_image_latents = masked_image_latents.to(device=context.device, dtype=context.weight_dtype)
 
         # assume batch size = 1
         mask = rearrange(mask, "f c h w -> 1 c f h w")
@@ -247,12 +245,11 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
             self._progress_bar_config = {}
         self._progress_bar_config.update(kwargs)
 
-    @staticmethod
     @Timer(name="paste_surrounding_pixels")
-    def paste_surrounding_pixels_back(decoded_latents, pixel_values, masks, device, weight_dtype):
+    def paste_surrounding_pixels_back(self, decoded_latents, pixel_values, masks):
         # Paste the surrounding pixels back, because we only want to change the mouth region
-        pixel_values = pixel_values.to(device=device, dtype=weight_dtype)
-        masks = masks.to(device=device, dtype=weight_dtype)
+        # pixel_values = pixel_values.to(device=device, dtype=weight_dtype)
+        # masks = masks.to(device=device, dtype=weight_dtype)
         combined_pixel_values = decoded_latents * masks + pixel_values * (1 - masks)
         return combined_pixel_values
 
@@ -353,6 +350,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
         return frames, is_last_batch
 
+    @Timer(name="preprocess_face")
     def _preprocess_face(self, frame: np.ndarray) -> Optional[LipsyncMetadata]:
         face, box, affine_matrix = self.image_processor.affine_transform(frame)
         # 创建LipsyncMetadata对象存储处理结果
@@ -363,6 +361,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
             original_frame=frame
         )
 
+    @Timer(name="preprocess_face_batch")
     def _preprocess_face_batch(self, frames: List[np.ndarray]) -> Optional[List[LipsyncMetadata]]:
         """Process a batch of frames for facial preprocessing, using the same face alignment logic as the original method"""
         """Core function for face_processor"""
@@ -389,8 +388,8 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         return metadata_list
 
     @Timer(name="denoising_step")
-    def _denoising_step(self, latents, t, audio_embeds, mask_latents, masked_image_latents, image_latents, context):
-        """执行单个降噪步骤"""
+    def _denoising_step(self, latents, t, audio_embeds, mask_latents, masked_image_latents, image_latents, context: LipsyncContext):
+        """Execute a single denoising step"""
         # Prepare model input
         latent_model_input = torch.cat([latents] * 2) if context.do_classifier_free_guidance else latents
         latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
@@ -440,6 +439,10 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
             faces, affine_transform=False
         )
 
+        pixel_values = pixel_values.to(context.device, dtype=context.weight_dtype)
+        masked_pixel_values = masked_pixel_values.to(context.device, dtype=context.weight_dtype)
+        masks = masks.to(context.device, dtype=context.weight_dtype)
+        
         # 5. Prepare mask latent variables
         mask_latents, masked_image_latents = self.prepare_mask_latents(
             context,
@@ -456,27 +459,25 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         # 7. Perform denoising process
         num_warmup_steps = len(timesteps) - context.num_inference_steps * self.scheduler.order
 
-        with self.progress_bar(total=context.num_inference_steps) as progress_bar:
-            for j, t in enumerate(timesteps):
-                # Execute denoising step
-                latents = self._denoising_step(
-                    latents, t, audio_embeds, mask_latents, 
-                    masked_image_latents, image_latents, context
-                )
+        # with self.progress_bar(total=context.num_inference_steps) as progress_bar:
+        for j, t in enumerate(timesteps):
+            # Execute denoising step
+            latents = self._denoising_step(
+                latents, t, audio_embeds, mask_latents, 
+                masked_image_latents, image_latents, context
+            )
 
-                # Update progress bar and callback
-                if j == len(timesteps) - 1 or ((j + 1) > num_warmup_steps and (j + 1) % self.scheduler.order == 0):
-                    progress_bar.update()
-                    if context.callback is not None and j % context.callback_steps == 0:
-                        context.callback(j, t, latents)
+            # Update progress bar and callback
+            if j == len(timesteps) - 1 or ((j + 1) > num_warmup_steps and (j + 1) % self.scheduler.order == 0):
+                # progress_bar.update()
+                if context.callback is not None and j % context.callback_steps == 0:
+                    context.callback(j, t, latents)
 
         # 8. Decode latents
         decoded_latents = self.decode_latents(latents)
 
         # 9. Post-process (paste surrounding pixels back)
-        decoded_latents = self.paste_surrounding_pixels_back(
-            decoded_latents, pixel_values, 1 - masks, context.device, context.weight_dtype
-        )
+        decoded_latents = decoded_latents * (1 - masks) + pixel_values * masks
 
         return decoded_latents, {}
 
@@ -529,7 +530,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         device = self._execution_device
         
         # Initialize image processor
-        self.image_processor = ImageProcessor(context.height, mask=context.mask, device=device)
+        self.image_processor = ImageProcessor(context.height, device=device)
 
         # Set height and width
         context.height = context.height or self.unet.config.sample_size * self.vae_scale_factor

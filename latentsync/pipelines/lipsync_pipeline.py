@@ -10,6 +10,7 @@ import torch
 import cv2
 import numpy as np
 import soundfile as sf
+from tqdm import tqdm
 
 
 from diffusers.models import AutoencoderKL
@@ -111,7 +112,7 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
                       batch_idx: int, context: LipsyncContext) -> Optional[List[LipsyncMetadata]]:
         """Process a single batch of frames"""
         # 1. Facial preprocessing
-        metadata_list = self._preprocess_face_batch(frames)
+        metadata_list: Optional[List[LipsyncMetadata]] = self._preprocess_face_batch(frames)
         
         if metadata_list is None:
             print(f"Batch {batch_idx+1} No valid face detected, skipping")
@@ -173,30 +174,6 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
             frames.append(frame)
 
         return frames, is_last_batch
-
-    @Timer(name="preprocess_face_batch")
-    def _preprocess_face_batch(self, frames: List[np.ndarray]) -> Optional[List[LipsyncMetadata]]:
-        """Process a batch of frames for facial preprocessing"""
-        if len(frames) == 0:
-            return None
-
-        metadata_list: List[LipsyncMetadata] = []
-
-        for frame in frames:
-            try:
-                metadata = self._preprocess_face(frame)
-                metadata_list.append(metadata)
-            except Exception as e:
-                print(f"Face preprocessing failed: {e}")
-                # If processing fails and there are other successfully processed frames, use the result of the previous frame
-                if len(metadata_list) > 0:
-                    metadata_list.append(metadata_list[-1])
-                # Otherwise skip this frame
-
-        if len(metadata_list) == 0:
-            return None
-
-        return metadata_list
 
     @Timer(name="restore_and_save_stream")
     def _restore_and_save_stream(self, metadata_list_all: List[List[LipsyncMetadata]],
@@ -290,8 +267,11 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         print(f"Total frames: {total_frames}, each batch frame count: {context.num_frames}, expected batch count: {total_batches}")
         
         batch_idx = 0
+        # 使用tqdm创建进度条
+        progress_bar = tqdm(total=total_frames, desc="Processing frames batch", unit="frame")
         while True:
-            print(f"Processing batch {batch_idx+1}/{total_batches}")
+            # 更新进度条描述，显示当前处理的批次
+            progress_bar.set_description(f"Processing batch {batch_idx+1}/{total_batches}")
             
             # Read a batch of video frames
             frames, is_video_last_batch = self._read_frame_batch(video_capture, context.num_frames)
@@ -313,10 +293,15 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
                     audio_last_batch = True
             
             batch_idx += 1
+            # 更新进度条
+            progress_bar.update(len(frames))
             
             # Break if both video and audio are finished
             if is_video_last_batch and audio_last_batch:
                 break
+        
+        # 关闭进度条
+        progress_bar.close()
         
         # Close video capture
         video_capture.release()

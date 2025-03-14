@@ -84,7 +84,7 @@ class Audio2Feature:
         whisper_chunks = []
         whisper_idx_multiplier = 50.0 / fps
         i = 0
-        print(f"video in {fps} FPS, audio idx in 50FPS")
+        # print(f"video in {fps} FPS, audio idx in 50FPS")
 
         while True:
             start_idx = int(i * whisper_idx_multiplier)

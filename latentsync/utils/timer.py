@@ -1,17 +1,18 @@
 import time
 from functools import wraps
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 class Timer:
-    """用于统计函数运行时间的装饰器类"""
+    """A decorator class for measuring function execution time"""
     
-    _stats: Dict[str, Dict[str, float]] = {}
+    _stats: Dict[str, Dict[str, float | List[float]]] = {}
+    _enabled: bool = False
     
     def __init__(self, name: Optional[str] = None, print_args: bool = False):
         """
         Args:
-            name: 计时器名称，如果不提供则使用被装饰函数的名称
-            print_args: 是否打印函数参数
+            name: Timer name, uses decorated function name if not provided
+            print_args: Whether to print function arguments
         """
         self.name = name
         self.print_args = print_args
@@ -22,22 +23,20 @@ class Timer:
             
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # 开始计时
+            if not Timer._enabled:
+                return func(*args, **kwargs)
+                
             start_time = time.time()
-            
-            # 执行函数
             result = func(*args, **kwargs)
-            
-            # 计算耗时
             elapsed_time = time.time() - start_time
             
-            # 更新统计信息
             if self.name not in Timer._stats:
                 Timer._stats[self.name] = {
                     'count': 0,
                     'total_time': 0,
                     'min_time': float('inf'),
-                    'max_time': float('-inf')
+                    'max_time': float('-inf'),
+                    'time_records': []
                 }
             
             stats = Timer._stats[self.name]
@@ -45,10 +44,10 @@ class Timer:
             stats['total_time'] += elapsed_time
             stats['min_time'] = min(stats['min_time'], elapsed_time)
             stats['max_time'] = max(stats['max_time'], elapsed_time)
+            stats['time_records'].append(elapsed_time)
             
-            # 打印信息
             args_str = f"args: {args}, kwargs: {kwargs}" if self.print_args else ""
-            print(f"[Timer] {self.name} {args_str} - 耗时: {elapsed_time*1000:.2f}ms")
+            print(f"[Timer] {self.name} {args_str} - Time: {elapsed_time*1000:.2f}ms")
             
             return result
             
@@ -56,18 +55,45 @@ class Timer:
     
     @staticmethod
     def print_stats():
-        """打印所有计时器的统计信息"""
+        """Print statistics for all timers"""
+        if not Timer._enabled:
+            return
+            
         print("\n=== Timer Statistics ===")
         for name, stats in Timer._stats.items():
-            avg_time = stats['total_time'] / stats['count']
+            time_records = stats['time_records']
+            
+            trimmed_mean = None
+            if len(time_records) > 2:
+                sorted_times = sorted(time_records)
+                trimmed_times = sorted_times[1:-1]
+                trimmed_mean = sum(trimmed_times) / len(trimmed_times)
+            
             print(f"\n{name}:")
-            print(f"  调用次数: {stats['count']}")
-            print(f"  平均耗时: {avg_time*1000:.2f}ms")
-            print(f"  最小耗时: {stats['min_time']*1000:.2f}ms")
-            print(f"  最大耗时: {stats['max_time']*1000:.2f}ms")
-            print(f"  总耗时: {stats['total_time']*1000:.2f}ms")
+            print(f"  Calls: {stats['count']}")
+            if trimmed_mean is not None:
+                print(f"  Avg time (trimmed): {trimmed_mean*1000:.2f}ms")
+            print(f"  Avg time: {(stats['total_time']/stats['count'])*1000:.2f}ms")
+            print(f"  Min time: {stats['min_time']*1000:.2f}ms")
+            print(f"  Max time: {stats['max_time']*1000:.2f}ms")
+            print(f"  Total time: {stats['total_time']*1000:.2f}ms")
     
     @staticmethod
     def reset_stats():
-        """重置所有计时器的统计信息"""
-        Timer._stats.clear() 
+        """Reset all timer statistics"""
+        Timer._stats.clear()
+        
+    @staticmethod
+    def enable():
+        """Enable timer"""
+        Timer._enabled = True
+        
+    @staticmethod
+    def disable():
+        """Disable timer"""
+        Timer._enabled = False
+        
+    @staticmethod
+    def is_enabled() -> bool:
+        """Return whether timer is enabled"""
+        return Timer._enabled 

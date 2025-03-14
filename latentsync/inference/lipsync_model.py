@@ -210,22 +210,12 @@ class LipsyncModel:
             batch_audio_features = audio_features[i:i+batch_size] if audio_features else None
             
             # Preprocess frames to get metadata
-            metadata_list = []
-            for frame in batch_frames:
-                try:
-                    # Process each frame to get face metadata
-                    metadata = self.process_frame(frame)
-                    metadata_list.append(metadata)
-                except Exception as e:
-                    print(f"Face preprocessing failed: {e}")
-                    # If processing fails and there are other successfully processed frames, use the previous frame's result
-                    if len(metadata_list) > 0:
-                        metadata_list.append(metadata_list[-1])
-                    # Otherwise skip this frame (this should be handled better in production)
+            metadata_list = self.pipeline._preprocess_face_batch(batch_frames)
             
             # Skip batch if no faces were detected
             if not metadata_list:
-                print(f"No faces detected in batch {i//batch_size + 1}")
+                for frame in batch_frames:
+                    yield frame
                 continue
                 
             # Process the batch
