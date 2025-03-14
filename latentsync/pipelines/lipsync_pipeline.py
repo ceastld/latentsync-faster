@@ -55,25 +55,6 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         self.register_modules(audio_encoder=audio_encoder)
         self.set_progress_bar_config(desc="Steps")
 
-    @Timer(name="init_with_context")
-    def init_with_context(self, context: LipsyncContext):
-        """Initialize pipeline parameters with context"""
-        # Initialize basic parameters
-        super().init_with_context(context)
-
-        # Set video fps
-        self.video_fps = context.video_fps
-
-        # Prepare extra step kwargs
-        context.extra_step_kwargs = self.prepare_extra_step_kwargs(
-            context.generator, context.eta
-        )
-
-        # Set progress bar config
-        self.set_progress_bar_config(desc=f"Sample frames: {context.num_frames}")
-
-        return self
-
     @Timer(name="prepare_audio_batch")
     def _prepare_audio_batch(self, whisper_feature: Optional[torch.Tensor], batch_idx: int, 
                            num_frames_in_batch: int, context: LipsyncContext) -> Optional[List[torch.Tensor]]:
@@ -118,7 +99,6 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
             print(f"Batch {batch_idx+1} No valid face detected, skipping")
             return None
             
-        # 从metadata中提取处理后的人脸图像，用于后续处理
         faces = torch.stack([metadata.face for metadata in metadata_list])
         
         # 2. Prepare audio features for the current batch
@@ -133,91 +113,10 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         
         # 4. 更新metadata_list中的face字段，存储处理后的人脸
         for i, metadata in enumerate(metadata_list):
-            # 创建一个新的LipsyncMetadata对象，包含原始数据和处理后的人脸
-            updated_metadata = LipsyncMetadata(
-                face=synced_faces_batch[i],  # 使用处理后的人脸
-                box=metadata.box,
-                affine_matrice=metadata.affine_matrice,
-                original_frame=metadata.original_frame
-            )
-            metadata_list[i] = updated_metadata
+            metadata.set_sync_face(synced_faces_batch[i])
             
         return metadata_list
         
-    @Timer(name="init_video_stream")
-    def _init_video_stream(self, video_path: str) -> tuple[cv2.VideoCapture, int]:
-        """Initialize video stream reading"""
-        # Open video file
-        video_capture = cv2.VideoCapture(video_path)
-        if not video_capture.isOpened():
-            raise ValueError(f"Cannot open video file: {video_path}")
-
-        # Get total frame count
-        total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        return video_capture, total_frames
-
-    @Timer(name="read_frame_batch")
-    def _read_frame_batch(self, video_capture: cv2.VideoCapture, batch_size: int) -> tuple[List[np.ndarray], bool]:
-        """Read a batch of video frames"""
-        frames: List[np.ndarray] = []
-        is_last_batch = False
-
-        for _ in range(batch_size):
-            ret, frame = video_capture.read()
-            if not ret:
-                is_last_batch = True
-                break
-
-            # Convert BGR to RGB
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(frame)
-
-        return frames, is_last_batch
-
-    @Timer(name="restore_and_save_stream")
-    def _restore_and_save_stream(self, metadata_list_all: List[List[LipsyncMetadata]],
-                               audio_samples: torch.Tensor, video_fps: int,
-                               audio_sample_rate: int, video_out_path: str) -> Optional[str]:
-        """Restore processed frames to original video and save"""
-        # Check if there are metadata
-        if not metadata_list_all:
-            print("No successfully processed frames, cannot restore video")
-            return None
-
-        print(f"Restoring video: Processed {len(metadata_list_all)} batches of data")
-
-        # 将所有批次的metadata列表合并为一个扁平列表
-        flat_metadata_list = []
-        for batch_metadata in metadata_list_all:
-            flat_metadata_list.extend(batch_metadata)
-
-        # 使用restore_video方法恢复视频
-        print(f"Restoring {len(flat_metadata_list)} frames of video...")
-        synced_video_frames = self.restore_video(flat_metadata_list)
-
-        # Process audio
-        audio_samples_remain_length = int(len(synced_video_frames) / video_fps * audio_sample_rate)
-        if audio_samples_remain_length > len(audio_samples):
-            print(f"Warning: Calculated audio length ({audio_samples_remain_length}) exceeds available audio samples ({len(audio_samples)}), audio will be truncated")
-            audio_samples_remain_length = len(audio_samples)
-
-        audio_samples = audio_samples[:audio_samples_remain_length].cpu().numpy()
-        print(f"Processed video length: {len(synced_video_frames)/video_fps:.2f} seconds, audio samples: {len(audio_samples)}")
-
-        # Save results
-        temp_dir = "temp"
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-        os.makedirs(temp_dir, exist_ok=True)
-
-        write_video(os.path.join(temp_dir, "video.mp4"), synced_video_frames, fps=video_fps)
-        sf.write(os.path.join(temp_dir, "audio.wav"), audio_samples, audio_sample_rate)
-
-        command = f"ffmpeg -y -loglevel error -nostdin -i {os.path.join(temp_dir, 'video.mp4')} -i {os.path.join(temp_dir, 'audio.wav')} -c:v libx264 -c:a aac -q:v 0 -q:a 0 {video_out_path}"
-        subprocess.run(command, shell=True)
-
-        return video_out_path
 
     @torch.no_grad()
     def __call__(

@@ -67,6 +67,9 @@ class LipsyncModel:
     def __init__(self, device: str = "cuda"):
         self.device = device
         self.lipsync_context: LipsyncContext = None
+        # 存储上一个音频 batch 的数据，用于流式处理
+        self.previous_audio_batch = None
+        self.previous_audio_features = None
 
     @cached_property
     def dtype(self):
@@ -89,15 +92,10 @@ class LipsyncModel:
         return torch.stack([metadata.face for metadata in metadata_list])
 
     @torch.no_grad()
-    def process_audio(self, audio_samples: np.ndarray, num_faces: int = -1) -> Optional[torch.Tensor]:
+    def process_audio(
+        self, audio_samples: np.ndarray, num_faces: int = -1
+    ) -> Optional[torch.Tensor]:
         """Process audio samples and align them with the number of faces."""
-        if not self.pipeline.unet.add_audio_layer:
-            return None
-
-        # Convert audio samples to tensor if needed
-        if not isinstance(audio_samples, torch.Tensor):
-            audio_samples = torch.from_numpy(audio_samples)
-
         # Process audio samples for this batch
         whisper_feature = self.pipeline.audio_encoder.samples2feat(audio_samples)
 
@@ -106,10 +104,19 @@ class LipsyncModel:
         )
 
         # Align audio features with the number of faces
-        return self._align_audio_features(audio_features, num_faces)
+        return self.align_audio_features(audio_features, num_faces)
+
+    def process_audio_with_pre(self, pre_audio_samples, audio_samples):
+        samples_per_frame = self.lipsync_context.samples_per_frame
+        num_frames = int(np.ceil(len(audio_samples) / samples_per_frame))
+        combined_samples = np.concatenate([pre_audio_samples, audio_samples])
+        combined_features = self.process_audio(combined_samples)
+        return combined_features[-num_frames:] if num_frames > 0 else []
 
     @torch.no_grad()
-    def _align_audio_features(self, audio_features: List[torch.Tensor], num_faces: int) -> List[torch.Tensor]:
+    def align_audio_features(
+        self, audio_features: List[torch.Tensor], num_faces: int
+    ) -> List[torch.Tensor]:
         """Ensure audio features match the number of faces by padding or trimming."""
         if len(audio_features) < num_faces:
             # Pad with last feature if needed
@@ -131,36 +138,13 @@ class LipsyncModel:
     ) -> torch.Tensor:
         """Run the diffusion model to generate synced faces."""
         synced_faces_batch, _ = self.pipeline._run_diffusion_batch(
-            faces,
-            audio_features,
-            self.lipsync_context.params,
-            self.lipsync_context.num_inference_steps,
-            self.lipsync_context.guidance_scale,
-            self.lipsync_context.weight_type,
-            self.lipsync_context.extra_step_kwargs,
-            self.lipsync_context.generator,
-            self.lipsync_context.callback,
-            self.lipsync_context.callback_steps,
+            faces, audio_features, self.lipsync_context
         )
         return synced_faces_batch
 
     @torch.no_grad()
-    def _update_metadata(
-        self, metadata_list: List[LipsyncMetadata], synced_faces_batch: torch.Tensor
-    ) -> List[LipsyncMetadata]:
-        """Update metadata with processed faces."""
-        updated_metadata = []
-        for i, metadata in enumerate(metadata_list):
-            updated_metadata.append(LipsyncMetadata(
-                face=synced_faces_batch[i],
-                box=metadata.box,
-                affine_matrice=metadata.affine_matrice,
-                original_frame=metadata.original_frame,
-            ))
-        return updated_metadata
-
-    @torch.no_grad()
     def process_frame(self, frame: np.ndarray):
+        """Process a single frame to extract face metadata."""
         return self.pipeline._preprocess_face(frame)
 
     @torch.no_grad()
@@ -175,55 +159,69 @@ class LipsyncModel:
 
         # 1. Extract processed faces from metadata
         faces = self._extract_faces(metadata_list)
-        
+
         # 2. Process audio for this batch
-        audio_features = self._align_audio_features(audio_features, len(faces))
-        
+        audio_features = self.align_audio_features(audio_features, len(faces))
+
         # 3. Run diffusion inference
         synced_faces_batch = self._run_diffusion(faces, audio_features)
-        
+
         # 4. Update metadata with processed faces
-        updated_metadata = self._update_metadata(metadata_list, synced_faces_batch)
-        
+        for i, metadata in enumerate(metadata_list):
+            metadata.set_sync_face(synced_faces_batch[i])
+
         # 5. Restore processed frames
-        output_frames = self.pipeline.restore_video(updated_metadata)
+        output_frames = self.pipeline.restore_video(metadata_list)
 
         return output_frames
-    
+
     @torch.no_grad()
     def process_video(self, video_frames: List[np.ndarray], audio_samples: np.ndarray):
         """Process a video with corresponding audio samples."""
         assert self.lipsync_context is not None
-        
+
         # 1. Process audio samples
         audio_features = self.process_audio(audio_samples, len(video_frames))
-        
+
         # 2. Define batch size based on context
         batch_size = self.lipsync_context.num_frames
-        
+
         # 3. Process video frames in batches
         for i in range(0, len(video_frames), batch_size):
             # Get current batch of frames
-            batch_frames = video_frames[i:i+batch_size]
-            
+            batch_frames = video_frames[i : i + batch_size]
+
             # Get corresponding audio features for this batch
-            batch_audio_features = audio_features[i:i+batch_size] if audio_features else None
-            
+            batch_audio_features = (
+                audio_features[i : i + batch_size] if audio_features else None
+            )
+
             # Preprocess frames to get metadata
             metadata_list = self.pipeline._preprocess_face_batch(batch_frames)
-            
+
             # Skip batch if no faces were detected
             if not metadata_list:
                 for frame in batch_frames:
                     yield frame
                 continue
-                
+
             # Process the batch
-            batch_output_frames = self.process_batch(metadata_list, batch_audio_features)
-            
+            batch_output_frames = self.process_batch(
+                metadata_list, batch_audio_features
+            )
+
             # Add processed frames to output
             for frame in batch_output_frames:
                 yield frame
-            
-            print(f"Processed batch {i//batch_size + 1}/{(len(video_frames) + batch_size - 1) // batch_size}")
-        
+
+            print(
+                f"Processed batch {i//batch_size + 1}/{(len(video_frames) + batch_size - 1) // batch_size}"
+            )
+
+    def reset_stream(self):
+        """
+        Reset the audio stream processing state.
+        Call this method when starting to process a new audio stream.
+        """
+        self.previous_audio_batch = None
+        self.previous_audio_features = None

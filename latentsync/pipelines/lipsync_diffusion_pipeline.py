@@ -27,10 +27,22 @@ from ..utils.timer import Timer
 
 @dataclass
 class LipsyncMetadata:
-    face: torch.Tensor  # 处理后的人脸图像
-    box: np.ndarray  # 人脸边界框
-    affine_matrice: np.ndarray  # 仿射变换矩阵
-    original_frame: np.ndarray  # 原始视频帧
+    face: np.ndarray
+    box: np.ndarray
+    affine_matrice: np.ndarray
+    original_frame: np.ndarray
+    sync_face: np.ndarray
+
+    def set_sync_face(self, face: torch.Tensor):
+        x1, y1, x2, y2 = self.box
+        height = int(y2 - y1)
+        width = int(x2 - x1)
+        # 调整人脸大小
+        face = torchvision.transforms.functional.resize(face, size=(height, width), antialias=True)
+        face = rearrange(face, "c h w -> h w c")
+        face = (face / 2 + 0.5).clamp(0, 1)
+        face = (face * 255).to(torch.uint8).cpu().numpy()
+        self.sync_face = face
 
 
 class LipsyncDiffusionPipeline(DiffusionPipeline):
@@ -276,7 +288,8 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
                     face=face,
                     box=box,
                     affine_matrice=affine_matrix,
-                    original_frame=frame
+                    original_frame=frame,
+                    sync_face=None  # 初始化为None，后续会更新
                 )
                 metadata_list.append(metadata)
             except Exception as e:
@@ -294,26 +307,12 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
     def restore_video(self, metadata_list):
         """使用LipsyncMetadata恢复视频帧"""
         out_frames = []
-        print(f"Restoring {len(metadata_list)} faces...")
+        
         for metadata in tqdm.tqdm(metadata_list):
             metadata: LipsyncMetadata
-            x1, y1, x2, y2 = metadata.box
-            height = int(y2 - y1)
-            width = int(x2 - x1)
-
-            # 获取处理后的人脸
-            face = metadata.face
-
-            # 调整人脸大小
-            face = torchvision.transforms.functional.resize(face, size=(height, width), antialias=True)
-            face = rearrange(face, "c h w -> h w c")
-            face = (face / 2 + 0.5).clamp(0, 1)
-            face = (face * 255).to(torch.uint8).cpu().numpy()
-
-            # 使用restorer将人脸放回原始帧
             out_frame = self.image_processor.restorer.restore_img(
                 metadata.original_frame,
-                face,
+                metadata.sync_face,
                 metadata.affine_matrice
             )
             out_frames.append(out_frame)
@@ -332,7 +331,8 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
 
         return video_capture, total_frames
-
+    
+    @Timer()
     def _read_frame_batch(self, video_capture: cv2.VideoCapture, batch_size: int) -> tuple[List[np.ndarray], bool]:
         """Read a batch of video frames"""
         frames: List[np.ndarray] = []
@@ -353,12 +353,12 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
     @Timer(name="preprocess_face")
     def _preprocess_face(self, frame: np.ndarray) -> Optional[LipsyncMetadata]:
         face, box, affine_matrix = self.image_processor.affine_transform(frame)
-        # 创建LipsyncMetadata对象存储处理结果
         return LipsyncMetadata(
             face=face,
             box=box,
             affine_matrice=affine_matrix,
-            original_frame=frame
+            original_frame=frame,
+            sync_face=None
         )
 
     @Timer(name="preprocess_face_batch")
@@ -480,7 +480,8 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         decoded_latents = decoded_latents * (1 - masks) + pixel_values * masks
 
         return decoded_latents, {}
-
+    
+    @Timer()
     def _restore_and_save_stream(self, metadata_list_all: List[List[LipsyncMetadata]],
                                audio_samples: torch.Tensor, video_fps: int,
                                audio_sample_rate: int, video_out_path: str) -> Optional[str]:
@@ -524,6 +525,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
         return video_out_path
 
+    @Timer()
     def init_with_context(self, context: LipsyncContext):
         """Initialize and validate parameters needed for inference"""
         # Get device
@@ -543,4 +545,12 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         context.device = device
         context.num_channels_latents = self.vae.config.latent_channels
         
+        # Set video fps
+        self.video_fps = context.video_fps
+
+        # Prepare extra step kwargs
+        context.extra_step_kwargs = self.prepare_extra_step_kwargs(
+            context.generator, context.eta
+        )
+
         return self
