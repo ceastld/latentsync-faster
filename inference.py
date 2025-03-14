@@ -17,7 +17,11 @@ def main(args):
 
     pipeline = get_lipsync_pipeline(dtype, "cuda", use_compile=False)
     config = GLOBAL_CONFIG.unet_config
-
+    if args.seed != -1:
+        set_seed(args.seed)
+    else:
+        torch.seed()
+        print(f"Initial seed: {torch.initial_seed()}")
     pipeline(
         video_path=args.video_path,
         audio_path=args.audio_path,
@@ -30,13 +34,6 @@ def main(args):
         width=config.data.resolution,
         height=config.data.resolution,
     )
-    
-    if args.seed != -1:
-        set_seed(args.seed)
-    else:
-        torch.seed()
-
-        print(f"Initial seed: {torch.initial_seed()}")
 
 
 if __name__ == "__main__":
@@ -51,4 +48,3 @@ if __name__ == "__main__":
     warnings.filterwarnings("ignore", message="Initializer .*")
 
     main(args)
-

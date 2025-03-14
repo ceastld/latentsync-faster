@@ -1,12 +1,12 @@
 import argparse
-from dataclasses import dataclass
 from functools import cached_property
 import os
-from typing import List, Optional, Union, Callable, Tuple
+from typing import List, Optional, Union, Tuple
 import numpy as np
 from omegaconf import OmegaConf
 import torch
 from diffusers import AutoencoderTiny, DPMSolverMultistepScheduler
+from latentsync.inference.context import LipsyncContext
 from latentsync.models.unet import UNet3DConditionModel
 from latentsync.pipelines import (
     LipsyncMetadata,
@@ -18,37 +18,6 @@ from diffusers.utils.import_utils import is_xformers_available
 from latentsync.utils.util import check_ffmpeg_installed
 from latentsync.whisper.audio2feature import Audio2Feature
 from configs.config import GLOBAL_CONFIG
-
-
-@dataclass
-class LipsyncContext:
-    audio_sample_rate: int = 16000
-    video_fps: int = 25
-    num_frames: int = 8
-    height: int = 256
-    width: int = 256
-    num_inference_steps: int = 3
-    guidance_scale: float = 1.5
-    weight_type: str = torch.float16
-    eta: float = 0.0
-    mask: str = "fix_mask"
-    generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None
-    callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None
-    callback_steps: int = 1
-
-    def init_pipeline(self, pipeline: LipsyncPipeline):
-        self.params = pipeline._initialize_parameters(
-            self.num_frames,
-            self.height,
-            self.width,
-            self.mask,
-            self.guidance_scale,
-            self.callback_steps,
-        )
-        pipeline.video_fps = self.video_fps
-        self.extra_step_kwargs = pipeline.prepare_extra_step_kwargs(
-            self.generator, self.eta
-        )
 
 
 def get_lipsync_pipeline(dtype, device, use_compile=False) -> LipsyncPipeline:
@@ -111,7 +80,7 @@ class LipsyncModel:
         return get_lipsync_pipeline(self.dtype, self.device)
 
     def infer_setup(self, lipsync_context: LipsyncContext):
-        lipsync_context.init_pipeline(self.pipeline)
+        self.pipeline.init_with_context(lipsync_context)
         self.lipsync_context = lipsync_context
 
     @torch.no_grad()

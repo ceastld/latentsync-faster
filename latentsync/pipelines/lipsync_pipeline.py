@@ -16,9 +16,7 @@ from diffusers.schedulers import (
     PNDMScheduler,
 )
 from diffusers.utils import logging
-
-
-from latentsync.pipelines.lipsync_diffusion_pipeline import InitializedParams
+from latentsync.inference.context import LipsyncContext
 from latentsync.pipelines.lipsync_diffusion_pipeline import LipsyncDiffusionPipeline
 from latentsync.pipelines.lipsync_diffusion_pipeline import LipsyncMetadata
 
@@ -49,19 +47,34 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         self.register_modules(audio_encoder=audio_encoder)
         self.set_progress_bar_config(desc="Steps")
 
-    def _initialize_parameters(self, num_frames, height, width, mask, guidance_scale, callback_steps):
-        self.set_progress_bar_config(desc=f"Sample frames: {num_frames}")
-        return super()._initialize_parameters(num_frames, height, width, mask, guidance_scale, callback_steps)
+    def init_with_context(self, context: LipsyncContext):
+        """Initialize pipeline parameters with context"""
+        # Initialize basic parameters
+        self._initialize_parameters(context)
+
+        # Set video fps
+        self.video_fps = context.video_fps
+
+        # Prepare extra step kwargs
+        context.extra_step_kwargs = self.prepare_extra_step_kwargs(
+            context.generator, context.eta
+        )
+
+        return self
+
+    def _initialize_parameters(self, context: LipsyncContext):
+        self.set_progress_bar_config(desc=f"Sample frames: {context.num_frames}")
+        return super()._initialize_parameters(context)
     
     def _prepare_audio_batch(self, whisper_feature: Optional[torch.Tensor], batch_idx: int, 
-                           num_frames_in_batch: int, params: InitializedParams) -> Optional[List[torch.Tensor]]:
+                           num_frames_in_batch: int, context: LipsyncContext) -> Optional[List[torch.Tensor]]:
         """Prepare audio features for the current batch"""
         """NOT the core function for audio_processor. Need further work for stream processing"""
         if not self.unet.add_audio_layer or whisper_feature is None:
             return None
             
         # Split audio features in batches of size num_frames
-        start_idx = batch_idx * params.num_frames
+        start_idx = batch_idx * context.num_frames
         
         # Calculate feature count using actual frame count for the batch
         chunks = self.audio_encoder.feature2chunks(
@@ -82,7 +95,7 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
             else:
                 # If no valid features, create zero-filled features
                 selected_chunks.append(torch.zeros_like(chunks[0]) if len(chunks) > 0 else 
-                                      torch.zeros((1, params.num_channels_latents)))
+                                      torch.zeros((1, context.num_channels_latents)))
         
         return selected_chunks
         
@@ -93,19 +106,7 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         audio_path: str,
         video_out_path: str,
         video_mask_path: str = None,
-        num_frames: int = 8,
-        video_fps: int = 25,
-        audio_sample_rate: int = 16000,
-        height: Optional[int] = None,
-        width: Optional[int] = None,
-        num_inference_steps: int = 3,
-        guidance_scale: float = 1.5,
-        weight_dtype: Optional[torch.dtype] = torch.float16,
-        eta: float = 0.0,
-        mask: str = "fix_mask",
-        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
-        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
-        callback_steps: Optional[int] = 1,
+        context: Optional[LipsyncContext] = None,
         **kwargs,
     ):
         """Execute lip sync inference, using stream processing for video frames"""
@@ -113,11 +114,13 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         is_train = self.unet.training
         self.unet.eval()
 
+        # Initialize context if not provided
+        if context is None:
+            context = LipsyncContext(**kwargs)
+        
         # Initialize parameters
         check_ffmpeg_installed()
-        params = self._initialize_parameters(num_frames, height, width, mask, guidance_scale, callback_steps)
-        extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
-        self.video_fps = video_fps
+        self.init_with_context(context)
         
         # Record total start time
         total_start_time = time.time()
@@ -134,12 +137,12 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         video_capture, total_frames = self._init_video_stream(video_path)
         
         # Get total batch count (for audio feature segmentation)
-        total_batches = (total_frames + num_frames - 1) // num_frames
+        total_batches = (total_frames + context.num_frames - 1) // context.num_frames
         
         # Calculate total audio feature count (if any)
         total_audio_chunks = 0
         if whisper_feature is not None:
-            chunks = self.audio_encoder.feature2chunks(feature_array=whisper_feature, fps=video_fps)
+            chunks = self.audio_encoder.feature2chunks(feature_array=whisper_feature, fps=context.video_fps)
             total_audio_chunks = len(chunks)
             print(f"Total audio feature count: {total_audio_chunks}, total video frame count: {total_frames}")
         
@@ -150,7 +153,7 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         
         # Start stream processing
         print(f"Starting stream processing video: {video_path}")
-        print(f"Total frames: {total_frames}, each batch frame count: {num_frames}, expected batch count: {total_batches}")
+        print(f"Total frames: {total_frames}, each batch frame count: {context.num_frames}, expected batch count: {total_batches}")
         
         batch_idx = 0
         while True:
@@ -161,7 +164,7 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
             
             # 1. Read a batch of video frames
             read_start = time.time()
-            frames, is_video_last_batch = self._read_frame_batch(video_capture, num_frames)
+            frames, is_video_last_batch = self._read_frame_batch(video_capture, context.num_frames)
             read_end = time.time()
             batch_step_times[batch_idx]["Read frames"] = read_end - read_start
             
@@ -191,7 +194,7 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
             # 3. Prepare audio features for the current batch
             audio_start = time.time()
             current_audio_features = self._prepare_audio_batch(
-                whisper_feature, batch_idx, len(faces), params
+                whisper_feature, batch_idx, len(faces), context
             )
             audio_end = time.time()
             batch_step_times[batch_idx]["Audio feature preparation"] = audio_end - audio_start
@@ -199,15 +202,14 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
             # Check if audio features have ended
             audio_last_batch = False
             if whisper_feature is not None:
-                start_idx = batch_idx * params.num_frames
+                start_idx = batch_idx * context.num_frames
                 if start_idx >= total_audio_chunks - len(faces):
                     audio_last_batch = True
                     
             # 4. Run diffusion inference on the current batch
             diffusion_start = time.time()
             synced_faces_batch, diffusion_step_times = self._run_diffusion_batch(
-                faces, current_audio_features, params, num_inference_steps,
-                guidance_scale, weight_dtype, extra_step_kwargs, generator, callback, callback_steps
+                faces, current_audio_features, context
             )
             diffusion_end = time.time()
             batch_step_times[batch_idx]["Diffusion inference"] = diffusion_end - diffusion_start
@@ -236,49 +238,23 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
             print(f"Batch {batch_idx+1} processing completed, total time: {batch_time:.2f} seconds")
             print("   Step times:")
             for step, step_time in batch_step_times[batch_idx].items():
-                print(f"  - {step}: {step_time:.2f} seconds")
+                print(f"      {step}: {step_time:.2f} seconds")
             
             batch_idx += 1
             
-            # If video or audio reaches the last batch, exit loop
-            if is_video_last_batch or audio_last_batch:
-                if is_video_last_batch:
-                    print("Video frames processing completed, exiting processing")
-                if audio_last_batch:
-                    print("Audio feature processing completed, exiting processing")
+            # Break if both video and audio are finished
+            if is_video_last_batch and audio_last_batch:
                 break
-                
-        # Close video stream
+        
+        # Close video capture
         video_capture.release()
         
-        if len(metadata_list_all) == 0:
-            print("No valid frames generated, check if video contains recognizable faces")
-            return None
-        
-        # Output average batch processing time
-        if batch_times:
-            avg_batch_time = sum(batch_times) / len(batch_times)
-            print(f"Average each batch processing time: {avg_batch_time:.2f} seconds")
-            print(f"Batch processing time details: {[f'{t:.2f}s' for t in batch_times]}")
-            
-        # 4. Video restoration and saving
-        print("Starting video restoration and saving...")
-        restore_start_time = time.time()
-        output_video = self._restore_and_save_stream(
+        # Restore video frames and save results
+        return self._restore_and_save_stream(
             metadata_list_all,
-            audio_samples, video_fps, audio_sample_rate, video_out_path
+            audio_samples,
+            context.video_fps,
+            context.audio_sample_rate,
+            video_out_path
         )
-        restore_end_time = time.time()
-        print(f"Video restoration and saving completed, time: {restore_end_time - restore_start_time:.2f} seconds")
-        
-        # Calculate total time
-        total_end_time = time.time()
-        total_time = total_end_time - total_start_time
-        print(f"Entire processing process completed, total time: {total_time:.2f} seconds")
-        
-        # Restore model state
-        if is_train:
-            self.unet.train()
-            
-        return output_video
     

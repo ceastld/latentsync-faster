@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
-from latentsync.inference.lipsync_model import LipsyncModel, LipsyncContext
+from latentsync.inference.context import LipsyncContext
+from latentsync.inference.lipsync_model import LipsyncModel
 from latentsync.pipelines.lipsync_diffusion_pipeline import LipsyncMetadata
 import torch
 from tqdm import tqdm

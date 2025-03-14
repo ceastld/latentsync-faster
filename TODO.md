@@ -7,6 +7,7 @@ stream inference
 * restore_img faster in affine_transform.py
 * may use [kornia](https://kornia.readthedocs.io/en/latest/geometry.transform.html#kornia.geometry.transform.warp_affine)
 
+* 排查每一步数据是否在GPU上
 
 # speed test
 * ori unet

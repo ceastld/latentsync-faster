@@ -1,9 +1,8 @@
 from dataclasses import dataclass
+from latentsync.inference.context import LipsyncContext
 from latentsync.models.unet import UNet3DConditionModel
 from latentsync.utils.image_processor import ImageProcessor
 from latentsync.utils.util import read_video, write_video
-
-
 import cv2
 import numpy as np
 import soundfile as sf
@@ -31,17 +30,6 @@ class LipsyncMetadata:
     box: np.ndarray  # 人脸边界框
     affine_matrice: np.ndarray  # 仿射变换矩阵
     original_frame: np.ndarray  # 原始视频帧
-
-
-@dataclass
-class InitializedParams:
-    batch_size: int
-    device: str
-    height: int
-    width: int
-    do_classifier_free_guidance: bool
-    num_frames: int
-    num_channels_latents: int
 
 
 class LipsyncDiffusionPipeline(DiffusionPipeline):
@@ -158,9 +146,16 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         return self.device
 
     def decode_latents(self, latents):
+        t0 = time.time()
         latents = latents / self.vae.config.scaling_factor + self.vae.config.shift_factor
+        t1 = time.time()
         latents = rearrange(latents, "b c f h w -> (b f) c h w")
+        t2 = time.time()
         decoded_latents = self.vae.decode(latents).sample
+        t3 = time.time()
+        
+        print(f"[Decode latents] Scaling: {(t1-t0)*1000:.2f}ms, Rearrange: {(t2-t1)*1000:.2f}ms, VAE decode: {(t3-t2)*1000:.2f}ms")
+        
         return decoded_latents
 
     def prepare_extra_step_kwargs(self, generator, eta):
@@ -194,59 +189,58 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
                 f" {type(callback_steps)}."
             )
 
-    def prepare_latents(self, batch_size, num_frames, num_channels_latents, height, width, dtype, device, generator):
+    def prepare_latents(self, context: LipsyncContext, num_frames: int):
+        """Prepare latent variables for diffusion"""
         shape = (
-            batch_size,
-            num_channels_latents,
+            context.batch_size,
+            context.num_channels_latents,
             1,
-            height // self.vae_scale_factor,
-            width // self.vae_scale_factor,
+            context.height // self.vae_scale_factor,
+            context.width // self.vae_scale_factor,
         )
-        rand_device = "cpu" if device.type == "mps" else device
-        latents = torch.randn(shape, generator=generator, device=rand_device, dtype=dtype).to(device)
+        rand_device = "cpu" if context.device.type == "mps" else context.device
+        latents = torch.randn(shape, generator=context.generator, device=rand_device, dtype=context.weight_dtype).to(context.device)
         latents = latents.repeat(1, 1, num_frames, 1, 1)
 
         # scale the initial noise by the standard deviation required by the scheduler
         latents = latents * self.scheduler.init_noise_sigma
         return latents
 
-    def prepare_mask_latents(
-        self, mask, masked_image, height, width, dtype, device, generator, do_classifier_free_guidance
-    ):
+    def prepare_mask_latents(self, context: LipsyncContext, mask: torch.Tensor, masked_image: torch.Tensor):
+        """Prepare mask latent variables"""
         # resize the mask to latents shape as we concatenate the mask to the latents
         # we do that before converting to dtype to avoid breaking in case we're using cpu_offload
         # and half precision
         mask = torch.nn.functional.interpolate(
-            mask, size=(height // self.vae_scale_factor, width // self.vae_scale_factor)
+            mask, size=(context.height // self.vae_scale_factor, context.width // self.vae_scale_factor)
         )
-        masked_image = masked_image.to(device=device, dtype=dtype)
+        masked_image = masked_image.to(device=context.device, dtype=context.weight_dtype)
 
         # encode the mask image into latents space so we can concatenate it to the latents
-        # masked_image_latents = self.vae.encode(masked_image).latent_dist.sample(generator=generator)
         masked_image_latents = self.vae.encode(masked_image).latents
         masked_image_latents = (masked_image_latents - self.vae.config.shift_factor) * self.vae.config.scaling_factor
 
         # aligning device to prevent device errors when concating it with the latent model input
-        masked_image_latents = masked_image_latents.to(device=device, dtype=dtype)
-        mask = mask.to(device=device, dtype=dtype)
+        masked_image_latents = masked_image_latents.to(device=context.device, dtype=context.weight_dtype)
+        mask = mask.to(device=context.device, dtype=context.weight_dtype)
 
         # assume batch size = 1
         mask = rearrange(mask, "f c h w -> 1 c f h w")
         masked_image_latents = rearrange(masked_image_latents, "f c h w -> 1 c f h w")
 
-        mask = torch.cat([mask] * 2) if do_classifier_free_guidance else mask
+        mask = torch.cat([mask] * 2) if context.do_classifier_free_guidance else mask
         masked_image_latents = (
-            torch.cat([masked_image_latents] * 2) if do_classifier_free_guidance else masked_image_latents
+            torch.cat([masked_image_latents] * 2) if context.do_classifier_free_guidance else masked_image_latents
         )
         return mask, masked_image_latents
 
-    def prepare_image_latents(self, images, device, dtype, generator, do_classifier_free_guidance):
-        images = images.to(device=device, dtype=dtype)
-        # image_latents = self.vae.encode(images).latent_dist.sample(generator=generator)
+    def prepare_image_latents(self, context: LipsyncContext, images: torch.Tensor):
+        """Prepare image latent variables"""
+        images = images.to(device=context.device, dtype=context.weight_dtype)
         image_latents = self.vae.encode(images).latents
         image_latents = (image_latents - self.vae.config.shift_factor) * self.vae.config.scaling_factor
         image_latents = rearrange(image_latents, "f c h w -> 1 c f h w")
-        image_latents = torch.cat([image_latents] * 2) if do_classifier_free_guidance else image_latents
+        image_latents = torch.cat([image_latents] * 2) if context.do_classifier_free_guidance else image_latents
 
         return image_latents
 
@@ -258,9 +252,16 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
     @staticmethod
     def paste_surrounding_pixels_back(decoded_latents, pixel_values, masks, device, weight_dtype):
         # Paste the surrounding pixels back, because we only want to change the mouth region
+        t0 = time.time()
         pixel_values = pixel_values.to(device=device, dtype=weight_dtype)
+        t1 = time.time()
         masks = masks.to(device=device, dtype=weight_dtype)
+        t2 = time.time()
         combined_pixel_values = decoded_latents * masks + pixel_values * (1 - masks)
+        t3 = time.time()
+        
+        print(f"[Paste pixels] Move pixel values to device: {(t1-t0)*1000:.2f}ms, Move masks to device: {(t2-t1)*1000:.2f}ms, Combine pixels: {(t3-t2)*1000:.2f}ms")
+        
         return combined_pixel_values
 
     @staticmethod
@@ -397,41 +398,22 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
 
     def _run_diffusion_batch(self, faces: torch.Tensor, audio_features: Optional[List[torch.Tensor]],
-                          params: InitializedParams, num_inference_steps: int,
-                          guidance_scale: float, weight_dtype: torch.dtype,
-                          extra_step_kwargs: dict, generator: Optional[Union[torch.Generator, List[torch.Generator]]],
-                          callback: Optional[Callable[[int, int, torch.FloatTensor], None]],
-                          callback_steps: Optional[int]) -> tuple[torch.Tensor, dict]:
+                          context: LipsyncContext) -> tuple[torch.Tensor, dict]:
         """Run diffusion inference on a single batch"""
         """Core function for diffusion_processor"""
         step_times: dict = {}  # Record time for each step
 
         # 1. Prepare latent variables
         latents_start = time.time()
-        batch_size = 1  # Single batch processing
         num_frames = len(faces)
-        num_channels_latents = params.num_channels_latents
-        height = params.height
-        width = params.width
-        device = params.device
-        do_classifier_free_guidance = params.do_classifier_free_guidance
 
-        latents = self.prepare_latents(
-            batch_size,
-            num_frames,
-            num_channels_latents,
-            height,
-            width,
-            weight_dtype,
-            device,
-            generator,
-        )
+        latents = self.prepare_latents(context, num_frames)
         latents_end = time.time()
         step_times["Prepare latent variables"] = latents_end - latents_start
 
         # 2. Set timesteps
         timesteps_start = time.time()
-        self.scheduler.set_timesteps(num_inference_steps, device=device)
+        self.scheduler.set_timesteps(context.num_inference_steps, device=context.device)
         timesteps = self.scheduler.timesteps
         timesteps_end = time.time()
         step_times["Set timesteps"] = timesteps_end - timesteps_start
@@ -440,8 +422,8 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         audio_start = time.time()
         if self.unet.add_audio_layer and audio_features is not None:
             audio_embeds = torch.stack(audio_features)
-            audio_embeds = audio_embeds.to(device, dtype=weight_dtype)
-            if do_classifier_free_guidance:
+            audio_embeds = audio_embeds.to(context.device, dtype=context.weight_dtype)
+            if context.do_classifier_free_guidance:
                 null_audio_embeds = torch.zeros_like(audio_embeds)
                 audio_embeds = torch.cat([null_audio_embeds, audio_embeds])
         else:
@@ -460,14 +442,9 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         # 5. Prepare mask latent variables
         mask_latents_start = time.time()
         mask_latents, masked_image_latents = self.prepare_mask_latents(
+            context,
             masks,
             masked_pixel_values,
-            height,
-            width,
-            weight_dtype,
-            device,
-            generator,
-            do_classifier_free_guidance,
         )
         mask_latents_end = time.time()
         step_times["Prepare mask latent variables"] = mask_latents_end - mask_latents_start
@@ -475,26 +452,23 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         # 6. Prepare image latent variables
         image_latents_start = time.time()
         image_latents = self.prepare_image_latents(
+            context,
             pixel_values,
-            device,
-            weight_dtype,
-            generator,
-            do_classifier_free_guidance,
         )
         image_latents_end = time.time()
         step_times["Prepare image latent variables"] = image_latents_end - image_latents_start
 
         # 7. Perform denoising process
         denoising_start = time.time()
-        num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
+        num_warmup_steps = len(timesteps) - context.num_inference_steps * self.scheduler.order
 
         denoising_step_times = []
-        with self.progress_bar(total=num_inference_steps) as progress_bar:
+        with self.progress_bar(total=context.num_inference_steps) as progress_bar:
             for j, t in enumerate(timesteps):
                 step_start = time.time()
 
                 # Prepare model input
-                latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
+                latent_model_input = torch.cat([latents] * 2) if context.do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
                 latent_model_input = torch.cat(
                     [latent_model_input, mask_latents, masked_image_latents, image_latents], dim=1
@@ -504,18 +478,18 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
                 noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=audio_embeds).sample
 
                 # Apply guidance
-                if do_classifier_free_guidance:
+                if context.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_audio = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_audio - noise_pred_uncond)
+                    noise_pred = noise_pred_uncond + context.guidance_scale * (noise_pred_audio - noise_pred_uncond)
 
                 # Calculate previous noise sample x_t -> x_t-1
-                latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
+                latents = self.scheduler.step(noise_pred, t, latents, **context.extra_step_kwargs).prev_sample
 
                 # Update progress bar and callback
                 if j == len(timesteps) - 1 or ((j + 1) > num_warmup_steps and (j + 1) % self.scheduler.order == 0):
                     progress_bar.update()
-                    if callback is not None and j % callback_steps == 0:
-                        callback(j, t, latents)
+                    if context.callback is not None and j % context.callback_steps == 0:
+                        context.callback(j, t, latents)
 
                 step_end = time.time()
                 denoising_step_times.append(step_end - step_start)
@@ -524,14 +498,28 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         step_times["Denoising process"] = denoising_end - denoising_start
         step_times["Average denoising per step"] = sum(denoising_step_times) / len(denoising_step_times) if denoising_step_times else 0
 
-        # 8. Decode and post-process
+        # 8. Decode latents
         decode_start = time.time()
         decoded_latents = self.decode_latents(latents)
-        decoded_latents = self.paste_surrounding_pixels_back(
-            decoded_latents, pixel_values, 1 - masks, device, weight_dtype
-        )
         decode_end = time.time()
-        step_times["Decode and post-process"] = decode_end - decode_start
+        decode_time = decode_end - decode_start
+        step_times["Decode latents"] = decode_time
+        print(f"[Timing] Total decode latents time: {decode_time*1000:.2f}ms")
+
+        # 9. Post-process (paste surrounding pixels back)
+        postprocess_start = time.time()
+        decoded_latents = self.paste_surrounding_pixels_back(
+            decoded_latents, pixel_values, 1 - masks, context.device, context.weight_dtype
+        )
+        postprocess_end = time.time()
+        postprocess_time = postprocess_end - postprocess_start
+        step_times["Paste surrounding pixels"] = postprocess_time
+        print(f"[Timing] Total paste surrounding pixels time: {postprocess_time*1000:.2f}ms")
+
+        # Total decode and post-process time (for backward compatibility)
+        total_time = decode_time + postprocess_time
+        step_times["Decode and post-process"] = total_time
+        print(f"[Timing] Combined decode and post-process time: {total_time*1000:.2f}ms")
 
         return decoded_latents, step_times
 
@@ -578,33 +566,21 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
         return video_out_path
 
-    def _initialize_parameters(self, num_frames, height, width, mask, guidance_scale, callback_steps):
+    def _initialize_parameters(self, context: LipsyncContext):
         """Initialize and validate parameters needed for inference"""
-        # Simplified version, may need to check other conditions in actual use
-        # num_frames = 8  # Hardcoded value from original code
-        batch_size = 1
+        # Get device
         device = self._execution_device
-        self.image_processor = ImageProcessor(height, mask=mask, device="cuda")
+        
+        # Initialize image processor
+        self.image_processor = ImageProcessor(context.height, mask=context.mask, device=device)
 
         # Set height and width
-        height = height or self.unet.config.sample_size * self.vae_scale_factor
-        width = width or self.unet.config.sample_size * self.vae_scale_factor
+        context.height = context.height or self.unet.config.sample_size * self.vae_scale_factor
+        context.width = context.width or self.unet.config.sample_size * self.vae_scale_factor
 
         # Check inputs
-        self.check_inputs(height, width, callback_steps)
+        self.check_inputs(context.height, context.width, context.callback_steps)
 
-        # Determine whether to use classifier-free guidance
-        do_classifier_free_guidance = guidance_scale > 1.0
-
-        # Return prepared parameters using InitializedParams dataclass
-        num_channels_latents = self.vae.config.latent_channels
-
-        return InitializedParams(
-            batch_size=batch_size,
-            device=device,
-            height=height,
-            width=width,
-            do_classifier_free_guidance=do_classifier_free_guidance,
-            num_frames=num_frames,
-            num_channels_latents=num_channels_latents,
-        )
+        # Update context with device and num_channels_latents
+        context.device = device
+        context.num_channels_latents = self.vae.config.latent_channels
