@@ -10,7 +10,7 @@ from latentsync.utils.video import save_frames_to_video, VideoReader
 
 def run_inference(video_path: str, audio_path: str, output_path: str):
     # Initialize model and context
-    context = LipsyncContext()
+    context = LipsyncContext(use_compile=False)
 
     lipsync_model = LipsyncModel(context)
 

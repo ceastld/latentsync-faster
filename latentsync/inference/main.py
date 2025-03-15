@@ -115,7 +115,7 @@ async def auto_push_data(video_path, audio_path, model: LatentSyncInference, max
     for i, frame in enumerate(cycle_video_stream(video_path, max_frames)):
         model.push_frame(frame)
         model.push_audio(audio_clips[i % len(audio_clips)])
-        await asyncio.sleep(1 / 30)
+        await asyncio.sleep(1 / 25)
     model.add_end_task()
 
 

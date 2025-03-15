@@ -73,10 +73,11 @@ class Timer:
             print(f"  Calls: {stats['count']}")
             if trimmed_mean is not None:
                 print(f"  Avg time (trimmed): {trimmed_mean*1000:.2f}ms")
-            print(f"  Avg time: {(stats['total_time']/stats['count'])*1000:.2f}ms")
-            print(f"  Min time: {stats['min_time']*1000:.2f}ms")
-            print(f"  Max time: {stats['max_time']*1000:.2f}ms")
-            print(f"  Total time: {stats['total_time']*1000:.2f}ms")
+            else:
+                print(f"  Avg time: {(stats['total_time']/stats['count'])*1000:.2f}ms")
+            # print(f"  Min time: {stats['min_time']*1000:.2f}ms")
+            # print(f"  Max time: {stats['max_time']*1000:.2f}ms")
+            # print(f"  Total time: {stats['total_time']*1000:.2f}ms")
     
     @staticmethod
     def reset_stats():

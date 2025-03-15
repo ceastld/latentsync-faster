@@ -10,59 +10,80 @@ stream inference
 * 排查每一步数据是否在GPU上
 
 # speed test
-* ori unet
+* ori var and unet
 ```
-Batch 5 processing completed, total time: 0.68 seconds
-   Step times:
-  - Read frames: 0.01 seconds
-  - Facial preprocessing: 0.27 seconds
-  - Audio feature preparation: 0.02 seconds
-  - Diffusion inference: 0.36 seconds
-  - Prepare latent variables: 0.00 seconds
-  - Set timesteps: 0.00 seconds
-  - Prepare audio embeddings: 0.00 seconds
-  - Prepare face masks: 0.00 seconds
-  - Prepare mask latent variables: 0.02 seconds
-  - Prepare image latent variables: 0.01 seconds
-  - Denoising process: 0.26 seconds
-  - Average denoising per step: 0.09 seconds
-  - Decode and post-process: 0.08 seconds
-```
+process_audio_with_pre:
+  Calls: 25
+  Avg time (trimmed): 15.33ms
 
-* torch.compile unet
-```
-Batch 3 processing completed, total time: 0.66 seconds
-   Step times:
-  - Read frames: 0.01 seconds
-  - Facial preprocessing: 0.30 seconds
-  - Audio feature preparation: 0.03 seconds
-  - Diffusion inference: 0.31 seconds
-  - Prepare latent variables: 0.00 seconds
-  - Set timesteps: 0.00 seconds
-  - Prepare audio embeddings: 0.00 seconds
-  - Prepare face masks: 0.00 seconds
-  - Prepare mask latent variables: 0.02 seconds
-  - Prepare image latent variables: 0.01 seconds
-  - Denoising process: 0.10 seconds
-  - Average denoising per step: 0.03 seconds
-  - Decode and post-process: 0.18 seconds
+prepare_latents:
+  Calls: 25
+  Avg time (trimmed): 0.20ms
+
+prepare_masks_and_masked_images:
+  Calls: 25
+  Avg time (trimmed): 3.09ms
+
+prepare_mask_latents:
+  Calls: 25
+  Avg time (trimmed): 5.65ms
+
+prepare_image_latents:
+  Calls: 25
+  Avg time (trimmed): 3.67ms
+
+_denoising_step:
+  Calls: 75
+  Avg time (trimmed): 86.93ms
+
+decode_latents:
+  Calls: 25
+  Avg time (trimmed): 3.96ms
+
+_run_diffusion_batch:
+  Calls: 25
+  Avg time (trimmed): 282.37ms
+
+process_batch:
+  Calls: 25
+  Avg time (trimmed): 453.20ms
 ```
 
 * torch.compile unet and vae
 ```
-Batch 5 processing completed, total time: 0.64 seconds
-   Step times:
-  - Read frames: 0.01 seconds
-  - Facial preprocessing: 0.28 seconds
-  - Audio feature preparation: 0.02 seconds
-  - Diffusion inference: 0.31 seconds
-  - Prepare latent variables: 0.00 seconds
-  - Set timesteps: 0.00 seconds
-  - Prepare audio embeddings: 0.00 seconds
-  - Prepare face masks: 0.00 seconds
-  - Prepare mask latent variables: 0.02 seconds
-  - Prepare image latent variables: 0.01 seconds
-  - Denoising process: 0.10 seconds
-  - Average denoising per step: 0.03 seconds
-  - Decode and post-process: 0.18 seconds
+process_audio_with_pre:
+  Calls: 25
+  Avg time (trimmed): 15.29ms
+
+prepare_latents:
+  Calls: 25
+  Avg time (trimmed): 0.20ms
+
+prepare_masks_and_masked_images:
+  Calls: 25
+  Avg time (trimmed): 3.21ms
+
+prepare_mask_latents:
+  Calls: 25
+  Avg time (trimmed): 5.85ms
+
+prepare_image_latents:
+  Calls: 25
+  Avg time (trimmed): 3.72ms
+
+_denoising_step:
+  Calls: 75
+  Avg time (trimmed): 42.86ms
+
+decode_latents:
+  Calls: 25
+  Avg time (trimmed): 4.12ms
+
+_run_diffusion_batch:
+  Calls: 25
+  Avg time (trimmed): 133.83ms
+
+process_batch:
+  Calls: 25
+  Avg time (trimmed): 398.39ms
 ```
