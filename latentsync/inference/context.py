@@ -2,7 +2,12 @@ from configs.config import GLOBAL_CONFIG
 import torch
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Union
-
+from functools import cached_property
+from omegaconf import OmegaConf
+from diffusers import AutoencoderTiny, DPMSolverMultistepScheduler
+from diffusers.utils.import_utils import is_xformers_available
+from latentsync.models.unet import UNet3DConditionModel
+from latentsync.whisper.audio2feature import Audio2Feature
 
 @dataclass
 class LipsyncContext:
@@ -39,24 +44,37 @@ class LipsyncContext:
         # Set do_classifier_free_guidance based on guidance_scale
         self.do_classifier_free_guidance = self.guidance_scale > 1.0
 
+    def create_audio_encoder(self) -> Audio2Feature:
+        """Create audio encoder for processing audio samples"""
+        return Audio2Feature(
+            model_path=GLOBAL_CONFIG.whisper_model_path,
+            device=self.device,
+            num_frames=self.num_frames,
+        )
 
-    def to_dict(self) -> dict:
-        """Convert context to dictionary for easy access"""
-        return {
-            "audio_sample_rate": self.audio_sample_rate,
-            "video_fps": self.video_fps,
-            "num_frames": self.num_frames,
-            "height": self.height,
-            "width": self.width,
-            "num_inference_steps": self.num_inference_steps,
-            "guidance_scale": self.guidance_scale,
-            "weight_dtype": self.weight_dtype,
-            "eta": self.eta,
-            "device": self.device,
-            "batch_size": self.batch_size,
-            "do_classifier_free_guidance": self.do_classifier_free_guidance,
-            "num_channels_latents": self.num_channels_latents,
-        }
+    def create_unet(self) -> UNet3DConditionModel:
+        """Create UNet model for diffusion"""
+        unet, _ = UNet3DConditionModel.from_pretrained(
+            OmegaConf.to_container(GLOBAL_CONFIG.unet_config.model),
+            GLOBAL_CONFIG.latentsync_unet_path,
+            device=self.device,
+        )
+        if is_xformers_available():
+            unet.enable_xformers_memory_efficient_attention()
+        return unet.eval().to(dtype=self.weight_dtype)
+
+    def create_vae(self) -> AutoencoderTiny:
+        """Create VAE model for encoding/decoding images"""
+        vae = AutoencoderTiny.from_pretrained("madebyollin/taesd", torch_dtype=self.weight_dtype)
+        vae.config.scaling_factor = 1.0
+        vae.config.shift_factor = 0
+        return vae.eval().to(self.device)
+
+    def create_scheduler(self) -> DPMSolverMultistepScheduler:
+        """Create diffusion scheduler"""
+        return DPMSolverMultistepScheduler.from_pretrained(
+            GLOBAL_CONFIG.config_dir, algorithm_type="dpmsolver++", solver_order=1
+        )
 
     @classmethod
     def from_dict(cls, config_dict: dict) -> "LipsyncContext":

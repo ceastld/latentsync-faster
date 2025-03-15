@@ -259,3 +259,28 @@ class AsyncTaskManager:
         await asyncio.gather(*self.tasks, return_exceptions=True)
         self.tasks.clear()
         self.logger.info("Task manager has been shutdown.")
+
+
+class VideoReader:
+    def __init__(self, video_path: str):
+        self.cap = cv2.VideoCapture(video_path)
+        self.fps = int(self.cap.get(cv2.CAP_PROP_FPS))
+        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    def read_frame(self):
+        ret, frame = self.cap.read()
+        if not ret:
+            return None
+        return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    def read_batch(self, batch_size: int):
+        frames = []
+        for _ in range(batch_size):
+            frame = self.read_frame()
+            if frame is None:
+                break
+            frames.append(frame)
+        return frames
+
+    def release(self):
+        self.cap.release()

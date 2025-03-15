@@ -1,3 +1,4 @@
+from __future__ import annotations
 from functools import cached_property
 from latentsync.inference.context import LipsyncContext
 from latentsync.models.unet import UNet3DConditionModel
@@ -113,12 +114,6 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
         self.init_with_context(lipsync_context)
 
-    def enable_vae_slicing(self):
-        self.vae.enable_slicing()
-
-    def disable_vae_slicing(self):
-        self.vae.disable_slicing()
-
     def enable_sequential_cpu_offload(self, gpu_id=0):
         if is_accelerate_available():
             from accelerate import cpu_offload
@@ -144,7 +139,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
                 return torch.device(module._hf_hook.execution_device)
         return self.device
 
-    @Timer(name="decode_latents")
+    @Timer()
     def decode_latents(self, latents):
         latents = latents / self.vae.config.scaling_factor + self.vae.config.shift_factor
         latents = rearrange(latents, "b c f h w -> (b f) c h w")
@@ -182,7 +177,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
                 f" {type(callback_steps)}."
             )
 
-    @Timer(name="prepare_latents")
+    @Timer()
     def prepare_latents(self, context: LipsyncContext, num_frames: int):
         """Prepare latent variables for diffusion"""
         shape = (
@@ -200,7 +195,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         latents = latents * self.scheduler.init_noise_sigma
         return latents
 
-    @Timer(name="prepare_mask_latents")
+    @Timer()
     def prepare_mask_latents(self, context: LipsyncContext, mask: torch.Tensor, masked_image: torch.Tensor):
         """Prepare mask latent variables"""
         # resize the mask to latents shape as we concatenate the mask to the latents
@@ -227,7 +222,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         )
         return mask, masked_image_latents
 
-    @Timer(name="prepare_image_latents")
+    @Timer()
     def prepare_image_latents(self, context: LipsyncContext, images: torch.Tensor):
         """Prepare image latent variables"""
         images = images.to(device=context.device, dtype=context.weight_dtype)
@@ -306,40 +301,9 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
     @cached_property
     def face_processor(self):
-        return FaceProcessor(resolution=self.lipsync_context.height, device=self.lipsync_context.device)
+        return FaceProcessor(resolution=self.lipsync_context.resolution, device=self.lipsync_context.device)
 
-
-    @Timer(name="preprocess_face")
-    def preprocess_face(self, frame: np.ndarray) -> Optional[LipsyncMetadata]:
-        return self.face_processor.prepare_face(frame)
-
-    @Timer(name="preprocess_face_batch")
-    def _preprocess_face_batch(self, frames: List[np.ndarray]) -> Optional[List[LipsyncMetadata]]:
-        """Process a batch of frames for facial preprocessing, using the same face alignment logic as the original method"""
-        """Core function for face_processor"""
-        if len(frames) == 0:
-            return None
-
-        metadata_list: List[LipsyncMetadata] = []
-
-        # Use the same preprocessing logic as original code
-        for frame in frames:
-            try:
-                metadata = self.face_processor.prepare_face(frame)
-                metadata_list.append(metadata)
-            except Exception as e:
-                print(f"Face preprocessing failed: {e}")
-                # If processing fails and there are other successfully processed frames, use the result of the previous frame
-                if len(metadata_list) > 0:
-                    metadata_list.append(metadata_list[-1])
-                # Otherwise skip this frame
-
-        if len(metadata_list) == 0:
-            return None
-
-        return metadata_list
-
-    @Timer(name="denoising_step")
+    @Timer()
     def _denoising_step(self, latents, t, audio_embeds, mask_latents, masked_image_latents, image_latents, context: LipsyncContext):
         """Execute a single denoising step"""
         # Prepare model input
@@ -362,7 +326,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         
         return latents
 
-    @Timer(name="run_diffusion_batch")
+    @Timer()
     def _run_diffusion_batch(self, faces: torch.Tensor, audio_features: Optional[List[torch.Tensor]],
                           context: LipsyncContext) -> tuple[torch.Tensor, dict]:
         """Run diffusion inference on a single batch"""
@@ -479,7 +443,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
     
     @cached_property
     def image_processor(self):
-        return ImageProcessor(self.lipsync_context.height, device=self.device)
+        return ImageProcessor(resolution=self.lipsync_context.resolution, device=self.lipsync_context.device)
 
     def init_with_context(self, context: LipsyncContext):
         """Initialize and validate parameters needed for inference"""

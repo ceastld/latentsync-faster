@@ -1,18 +1,11 @@
 # Adapted from https://github.com/guoyww/AnimateDiff/blob/main/animatediff/pipelines/pipeline_animation.py
+from __future__ import annotations
 
-from typing import Callable, List, Optional, Tuple, Union
-import time
-import os
-import shutil
-import subprocess
+from typing import List, Optional, Union
 
 import torch
-import cv2
 import numpy as np
-import soundfile as sf
 from tqdm import tqdm
-
-
 from diffusers.models import AutoencoderKL
 from diffusers.schedulers import (
     DDIMScheduler,
@@ -28,7 +21,7 @@ from latentsync.pipelines.lipsync_diffusion_pipeline import LipsyncDiffusionPipe
 from latentsync.pipelines.metadata import LipsyncMetadata
 
 from ..models.unet import UNet3DConditionModel
-from ..utils.util import read_audio, check_ffmpeg_installed, write_video
+from ..utils.util import read_audio
 from ..whisper.audio2feature import Audio2Feature
 from ..utils.timer import Timer
 

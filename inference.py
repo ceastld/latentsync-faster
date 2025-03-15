@@ -1,25 +1,17 @@
 import argparse
 import warnings
-import torch
 from latentsync.inference.context import LipsyncContext
-from latentsync.inference.lipsync_model import get_lipsync_pipeline
-from accelerate.utils import set_seed as acc_seed
+from latentsync.inference.utils import create_pipeline
+from latentsync.inference.utils import set_seed
 from latentsync.utils.timer import Timer
 
-
-def set_seed(seed: int):
-    if seed != -1:
-        acc_seed(seed)
-    else:
-        torch.seed()
-        print(f"Initial seed: {torch.initial_seed()}")
 
 def main(args):
     print(f"Input video path: {args.video_path}")
     print(f"Input audio path: {args.audio_path}")
 
     context = LipsyncContext()
-    pipeline = get_lipsync_pipeline(context)
+    pipeline = create_pipeline(context)
 
     set_seed(args.seed)
 
