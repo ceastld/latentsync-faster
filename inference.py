@@ -33,6 +33,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     warnings.filterwarnings("ignore", message="W:onnxruntime")
 
-    # Timer.enable()
+    Timer.enable()
 
     main(args)

@@ -48,7 +48,7 @@ class FaceLandmarkDetector:
         
         # 配置ONNX运行时选项，启用GPU支持
         providers = []
-        if self.device.lower() == "cuda":
+        if "cuda" in str(self.device).lower():
             # 检查CUDA是否可用
             if 'CUDAExecutionProvider' in ort.get_available_providers():
                 providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']

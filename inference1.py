@@ -76,6 +76,6 @@ if __name__ == "__main__":
     audio_path = "assets/cxk.mp3"
     output_path = "output/obama_cxk1.mp4"
 
-    # Timer.enable()
+    Timer.enable()
     run_inference(video_path, audio_path, output_path)
     Timer.summary()
