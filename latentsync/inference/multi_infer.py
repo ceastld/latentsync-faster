@@ -10,6 +10,8 @@ import asyncio
 import warnings
 import logging
 
+from latentsync.utils.timer import Timer
+
 class InferenceWorker:
     def __init__(self, num_workers=1, worker_timeout=60):
         self.worker_timeout = worker_timeout

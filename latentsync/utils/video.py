@@ -284,3 +284,19 @@ class VideoReader:
 
     def release(self):
         self.cap.release()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        frame = self.read_frame()
+        if frame is None:
+            self.release()
+            raise StopIteration
+        return frame
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()

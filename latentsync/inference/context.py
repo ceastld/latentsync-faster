@@ -1,4 +1,4 @@
-from configs.config import GLOBAL_CONFIG
+from latentsync.configs.config import GLOBAL_CONFIG
 import torch
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Union
