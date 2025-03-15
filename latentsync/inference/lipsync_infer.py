@@ -1,12 +1,12 @@
 from latentsync.inference.context import LipsyncContext
 from latentsync.inference.lipsync_model import LipsyncModel
-from latentsync.inference.multi_infer import MultiProcessInference
+from latentsync.inference.multi_infer import MultiThreadInference
 from latentsync.pipelines.metadata import LipsyncMetadata
 import torch
 from typing import List, override
 
 
-class LipsyncInference(MultiProcessInference):
+class LipsyncInference(MultiThreadInference):
     def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60):
         super().__init__(num_workers, worker_timeout)
         self.context = context

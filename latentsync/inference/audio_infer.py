@@ -8,7 +8,7 @@ from latentsync.configs.config import GLOBAL_CONFIG
 from latentsync.inference.context import LipsyncContext
 from latentsync.utils.timer import Timer
 from latentsync.whisper.whisper.audio import load_audio
-from latentsync.inference.multi_infer import MultiProcessInference
+from latentsync.inference.multi_infer import MultiProcessInference, MultiThreadInference
 
 
 class AudioProcessor:
@@ -55,7 +55,7 @@ class AudioProcessor:
         return audio_features
 
 
-class AudioInference(MultiProcessInference):
+class AudioInference(MultiThreadInference):
     def __init__(
         self,
         context: LipsyncContext,
@@ -125,7 +125,7 @@ async def wait_for_results(infer: AudioInference):
 
 async def main():
     context = LipsyncContext()
-    infer = AudioInference(context, enable_timer=True)
+    infer = AudioInference(context)
     infer.start_workers()
     infer.wait_worker_loaded()
     await auto_push_audio(GLOBAL_CONFIG.inference.default_audio_path, infer)
@@ -136,6 +136,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    Timer.enable()
+    # Timer.enable()
     asyncio.run(main())
     Timer.summary()

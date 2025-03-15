@@ -6,19 +6,15 @@ from latentsync.inference.context import LipsyncContext
 from latentsync.utils.face_processor import FaceProcessor
 from latentsync.utils.timer import Timer
 from latentsync.utils.video import VideoReader
-from latentsync.inference.multi_infer import MultiProcessInference
+from latentsync.inference.multi_infer import MultiThreadInference
 
-class FaceInference(MultiProcessInference):
+class FaceInference(MultiThreadInference):
     def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60):
         super().__init__(num_workers, worker_timeout)
         self.context = context
 
     def get_model(self):
         return FaceProcessor(self.context.resolution, self.context.device)
-    
-    def worker(self):
-        Timer.enable()
-        return super().worker()
     
     def infer_task(self, model: FaceProcessor, image: np.ndarray):
         return model.prepare_face(image)
@@ -27,10 +23,11 @@ class FaceInference(MultiProcessInference):
         self.add_one_task(frame)
     
 async def auto_push_face(video_path: str, infer: FaceInference):
-    with VideoReader(video_path) as video_reader:
-        for frame in video_reader:
-            infer.push_frame(frame)
-            # await asyncio.sleep(0.04)
+    reader = VideoReader(video_path)
+    for frame in reader:
+        infer.push_frame(frame)
+        # await asyncio.sleep(1/100)
+    reader.release()
     infer.add_end_task()
 
 async def wait_for_results(infer: FaceInference):
@@ -44,10 +41,12 @@ async def wait_for_results(infer: FaceInference):
 
 async def main():
     context = LipsyncContext()
-    infer = FaceInference(context)
+    infer = FaceInference(context, num_workers=1)
     infer.start_workers()
-    await auto_push_face(GLOBAL_CONFIG.inference.default_video_path, infer)
+    infer.wait_worker_loaded()
+    task = asyncio.create_task(auto_push_face(GLOBAL_CONFIG.inference.default_video_path, infer))
     results = await wait_for_results(infer)
+    await task
     # print(results)
 
 if __name__ == "__main__":  

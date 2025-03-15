@@ -9,21 +9,35 @@ import torch
 import asyncio
 import warnings
 import logging
+import threading
+import queue
 
 from latentsync.utils.timer import Timer
+
+class WorkerStoppedException(Exception):
+    """Exception raised when trying to get results from stopped workers"""
+    pass
 
 class InferenceWorker:
     def __init__(self, num_workers=1, worker_timeout=60):
         self.worker_timeout = worker_timeout
         self.task_queue = mp.Queue()  # Queue to hold tasks dynamically
         manager = Manager()
-        # self.results = manager.list()
         self.results = manager.dict()
         self.task_complete_counter = Value("i", 0)  # Shared variable to track progress.
         self.lock = Lock()
         self.num_workers = num_workers
         self.task_start_counter = Value("i", 0)
         self.task_wait_counter = Value("i", 0)
+        self._stopped = Value('b', False)  # Boolean flag to indicate if workers are stopped
+
+    def is_stopped(self):
+        """Check if the workers have been stopped"""
+        return self._stopped.value
+
+    def _mark_stopped(self):
+        """Mark the workers as stopped"""
+        self._stopped.value = True
 
     def infer_task(self, model, input_data):
         """
@@ -47,14 +61,16 @@ class InferenceWorker:
         raise NotImplementedError("Subclasses must implement this method.")
 
     async def _wait_for_id(self, id, remove=True):
-        while self.is_alive():
+        while self.is_alive() or len(self.results) > 0:
             if id in self.results:
                 if remove:
                     return self.results.pop(id)
                 else:
                     return self.results[id]
-            await asyncio.sleep(0.04)
-        return None
+            if self.is_stopped():
+                raise WorkerStoppedException("Workers have been stopped")
+            await asyncio.sleep(0.01)
+        raise WorkerStoppedException("Workers are not alive and no results available")
 
     async def wait_one_result(self, remove=True):
         """
@@ -69,9 +85,13 @@ class InferenceWorker:
     
     async def result_stream(self):
         while self.is_alive() or len(self.results) > 0:
-            result = await self.wait_one_result()
-            yield result
-
+            try:
+                result = await self.wait_one_result()
+                yield result
+            except WorkerStoppedException:
+                print("stream stopped")
+                break
+            
     async def wait_for_results(self, count: int, pbar: tqdm = None, remove=True):
         """
         Wait for a specific number of results to be available.
@@ -131,19 +151,165 @@ class InferenceWorker:
         raise NotImplementedError("Subclasses must implement this method.")
 
     def stop_workers(self):
+        """
+        Stop all workers gracefully.
+        This method should be implemented by subclasses.
+        """
+        self._mark_stopped()
         raise NotImplementedError("Subclasses must implement this method.")
 
     def dispose(self):
+        """Clean up resources and stop workers"""
+        self._mark_stopped()
         self.stop_workers()
 
 
 class MultiThreadInference(InferenceWorker):
     """
-    Multi-threaded inference worker class.
-    Note: This class is not fully implemented yet.
+    Multi-threaded inference worker class for PyTorch CUDA inference.
+    This class implements thread-safe model inference using a shared model instance.
     """
-    def __init__(self, num_workers=1, worker_timeout=60):
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    logger = logging.getLogger("MultiThreadInference")
+
+    def __init__(self, num_workers=1, worker_timeout=60, enable_timer=False):
+        """
+        Initialize the multi-thread inference class.
+        :param num_workers: Number of worker threads to spawn
+        :param worker_timeout: Timeout for worker threads in seconds
+        :param enable_timer: Whether to enable performance timing
+        """
         super().__init__(num_workers=num_workers, worker_timeout=worker_timeout)
+        # Replace multiprocessing constructs with thread-safe alternatives
+        self.task_queue = queue.Queue()
+        self.results = {}
+        self.results_lock = threading.Lock()
+        self.task_complete_counter = 0
+        self.counter_lock = threading.Lock()
+        self.worker_list: List[threading.Thread] = []
+        self.worker_loaded_count = 0
+        self.worker_loaded_event = threading.Event()
+        self.enable_timer = enable_timer
+        self.model_lock = threading.Lock()
+
+    def get_model(self):
+        """
+        Load the model for inference. This is a placeholder method.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
+
+    def _set_result(self, idx, result: np.ndarray):
+        """
+        Thread-safe method to set inference results
+        """
+        with self.results_lock:
+            self.results[idx] = result
+            with self.counter_lock:
+                self.task_complete_counter += 1
+
+    @Timer()
+    def wait_worker_loaded(self, timeout=None):
+        if self.worker_loaded_count > 0:
+            return True
+        loaded = self.worker_loaded_event.wait(timeout=timeout)
+        if loaded:
+            self.logger.info("Worker Loaded")
+        return loaded
+
+    def process_task(self, model, idx, input_data):
+        """
+        Process a single inference task with thread-safe model access
+        """
+        result = None
+        if input_data is not None:
+            with self.model_lock:
+                result = self.infer_task(model, input_data)
+        self._set_result(idx, result)
+
+    def preprocess(self):
+        """
+        Preprocess function to be run before processing tasks
+        """
+        pass
+
+    def worker(self):
+        """
+        Worker thread function to process tasks from the queue
+        """
+        if self.enable_timer:
+            Timer.enable()
+        model = self.get_model()
+
+        with self.counter_lock:
+            self.worker_loaded_count += 1
+        self.worker_loaded_event.set()
+
+        while True:
+            try:
+                idx, input_data = self.task_queue.get(timeout=self.worker_timeout)
+                if idx is None:
+                    self.logger.info("Worker received end task, worker exit")
+                    break
+                try:
+                    self.preprocess()
+                    self.process_task(model, idx, input_data)
+                except Exception as e:
+                    print(f"Error in worker: {e}, worker exit")
+                    traceback.print_exc()
+                    break
+                finally:
+                    self.task_queue.task_done()
+            except queue.Empty:
+                continue
+
+        with self.counter_lock:
+            self.worker_loaded_count -= 1
+        Timer.summary()
+
+    def is_alive(self):
+        return any(t.is_alive() for t in self.worker_list)
+
+    def start_workers(self):
+        """
+        Start worker threads and initialize the shared model
+        """
+        
+        # Start threads
+        for _ in range(self.num_workers):
+            t = threading.Thread(target=self.worker, daemon=True)
+            t.start()
+            self.worker_list.append(t)
+
+    def stop_workers(self):
+        """
+        Stop all worker threads gracefully
+        """
+        # Send stop signals to workers
+        self.add_end_task()
+        
+        # Wait for all threads to finish
+        for t in self.worker_list:
+            t.join()
+        
+        self.worker_list.clear()
+        with self.counter_lock:
+            self.worker_loaded_count = 0
+        
+        # Get final results
+        with self.results_lock:
+            return [self.results[key] for key in sorted(self.results.keys())]
+
+    def add_tasks(self, tasks):
+        """
+        Add tasks to the queue
+        """
+        with self.lock:
+            start_idx = self.task_start_counter.value
+            self.task_start_counter.value += len(tasks)
+
+        for idx, task in enumerate(tasks):
+            self.task_queue.put((start_idx + idx, task))
+        return range(start_idx, start_idx + len(tasks))
 
 
 class MultiProcessInference(InferenceWorker):

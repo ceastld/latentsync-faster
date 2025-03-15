@@ -9,7 +9,7 @@ from latentsync.inference.lipsync_infer import LipsyncInference
 from latentsync.inference.audio_infer import AudioInference
 from latentsync.inference.context import LipsyncContext
 from latentsync.inference.face_infer import FaceInference
-from latentsync.inference.multi_infer import MultiProcessInference
+from latentsync.inference.multi_infer import MultiThreadInference
 from latentsync.inference.utils import load_audio_clips
 from latentsync.pipelines.metadata import LipsyncMetadata
 from latentsync.utils.timer import Timer
@@ -24,18 +24,18 @@ class LatentSyncInference:
         self.metadata_queue: asyncio.Queue[LipsyncMetadata] = asyncio.Queue()
         self.audio_feature_queue: asyncio.Queue[np.ndarray] = asyncio.Queue()
 
+        self.lipsync_model = LipsyncInference(context=context, worker_timeout=worker_timeout)
+        self.lipsync_model.start_workers()
         self.face_model = FaceInference(context=context, worker_timeout=worker_timeout)
         self.face_model.start_workers()
         self.audio_model = AudioInference(context=context, worker_timeout=worker_timeout)
         self.audio_model.start_workers()
-        self.lipsync_model = LipsyncInference(context=context, worker_timeout=worker_timeout)
-        self.lipsync_model.start_workers()
         self.stopped = False
 
     @property
     def workers(self):
         for k, v in self.__dict__.items():
-            if isinstance(v, MultiProcessInference):
+            if isinstance(v, MultiThreadInference):
                 yield v
 
     @Timer()
@@ -78,31 +78,32 @@ class LatentSyncInference:
     async def process_face(self):
         pbar = tqdm(desc="Processing face")
         async for data in self.face_model.result_stream():
-            self.metadata_queue.put_nowait(data)
+            await self.metadata_queue.put(data)
             pbar.update(1)
+        self.metadata_queue.put_nowait(None)
         pbar.close()
 
     async def process_audio(self):
         pbar = tqdm(desc="Processing audio")
         async for data in self.audio_model.result_stream():
-            self.audio_feature_queue.put_nowait(data)
+            await self.audio_feature_queue.put(data)
             pbar.update(1)
+        self.audio_feature_queue.put_nowait(None)
         pbar.close()
 
     async def push_data_to_lipsync(self):
         while self.is_alive():
             metadata = await self.metadata_queue.get()
             audio_feature = await self.audio_feature_queue.get()
-            if metadata is None and audio_feature is None:
+            if metadata is None or audio_feature is None:
                 self.lipsync_model.add_end_task()
                 break
             metadata.audio_feature = audio_feature
             self.lipsync_model.push_data(metadata)
 
     async def wait_for_results(self):
-        while self.is_alive():
-            async for data in self.lipsync_model.result_stream():
-                yield data
+        async for data in self.lipsync_model.result_stream():
+            yield data
 
     def add_end_task(self):
         for worker in (self.audio_model, self.face_model):
@@ -114,7 +115,7 @@ async def auto_push_data(video_path, audio_path, model: LatentSyncInference, max
     for i, frame in enumerate(cycle_video_stream(video_path, max_frames)):
         model.push_frame(frame)
         model.push_audio(audio_clips[i % len(audio_clips)])
-        await asyncio.sleep(1/30)
+        await asyncio.sleep(1 / 30)
     model.add_end_task()
 
 
@@ -126,22 +127,23 @@ async def wait_for_results(model: LatentSyncInference):
 
 
 async def main():
-    Timer.enable()
-
     context = LipsyncContext()
     model = LatentSyncInference(context)
     model.wait_loaded()
     model.start_processing()
-    await auto_push_data(
-        GLOBAL_CONFIG.inference.default_video_path,
-        GLOBAL_CONFIG.inference.default_audio_path,
-        model,
+    asyncio.create_task(
+        auto_push_data(
+            GLOBAL_CONFIG.inference.default_video_path,
+            GLOBAL_CONFIG.inference.default_audio_path,
+            model,
+        )
     )
     await wait_for_results(model)
 
-    Timer.summary()
     model.stop_workers()
 
 
 if __name__ == "__main__":
+    # Timer.enable()
     asyncio.run(main())
+    Timer.summary()

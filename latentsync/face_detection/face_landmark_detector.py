@@ -96,16 +96,16 @@ class FaceLandmarkDetector:
         orig_size = image.shape
         
         # 预处理图像
-        img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        img = cv2.resize(img, (320, 240))
+        # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = cv2.resize(image, (320, 240))
         img_mean = np.array([127, 127, 127])
-        img = (img - img_mean) / 128
-        img = np.transpose(img, [2, 0, 1])
-        img = np.expand_dims(img, axis=0)
-        img = img.astype(np.float32)
+        image = (image - img_mean) / 128
+        image = np.transpose(image, [2, 0, 1])
+        image = np.expand_dims(image, axis=0)
+        image = image.astype(np.float32)
         
         # 运行检测器
-        confidences, boxes = self.face_detector.run(None, {self.face_detector_input_name: img})
+        confidences, boxes = self.face_detector.run(None, {self.face_detector_input_name: image})
         
         # 获取边界框
         boxes, labels, probs = self._predict_boxes(orig_size[1], orig_size[0], confidences, boxes, 0.7)
@@ -147,7 +147,7 @@ class FaceLandmarkDetector:
         picked_box_probs[:, 3] *= height
         return picked_box_probs[:, :4].astype(np.int32), np.array(picked_labels), picked_box_probs[:, 4]
     
-    @Timer()
+    # @Timer()
     def get_landmarks(self, image: Union[np.ndarray, torch.Tensor]) -> Optional[List[np.ndarray]]:
         """
         获取图像中的面部关键点
@@ -176,7 +176,6 @@ class FaceLandmarkDetector:
         
         return self._get_landmarks_onnx(image)
     
-    @Timer()
     def _get_landmarks_onnx(self, image: np.ndarray) -> Optional[List[np.ndarray]]:
         """使用ONNX模型获取关键点"""
         # 检测人脸
@@ -197,7 +196,6 @@ class FaceLandmarkDetector:
         
         return [landmarks]
     
-    @Timer()
     def _preprocess_landmark_input(self, image: np.ndarray, box: np.ndarray) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
         """预处理关键点检测的输入"""
         x1, y1, x2, y2 = box
