@@ -1,20 +1,19 @@
 import os
-import time
 import numpy as np
 import cv2
 import torch
 import onnxruntime as ort
 from typing import List, Optional, Tuple, Union
 
+from latentsync.utils.timer import Timer
+
 from .utils.box_utils import hard_nms
-from .utils.bbox import BBox
 
 class FaceLandmarkDetector:
     """统一的人脸关键点检测接口"""
     
     def __init__(self, 
-                 device: str = "cpu", 
-                 detector_type: str = "onnx",
+                 device: str = "cuda", 
                  face_detector_path: Optional[str] = None,
                  landmark_detector_path: Optional[str] = None):
         """
@@ -22,13 +21,10 @@ class FaceLandmarkDetector:
         
         Args:
             device: 设备，'cpu'或'cuda'
-            detector_type: 检测器类型，'onnx'或'face_alignment'
             face_detector_path: 人脸检测器模型路径，如果为None则使用默认路径
             landmark_detector_path: 关键点检测器模型路径，如果为None则使用默认路径
-            enable_timing: 是否启用时间测量
         """
         self.device = device
-        self.detector_type = detector_type
         
         # 设置默认模型路径
         if face_detector_path is None:
@@ -39,44 +35,51 @@ class FaceLandmarkDetector:
         self.face_detector_path = face_detector_path
         self.landmark_detector_path = landmark_detector_path
         
-        # 根据检测器类型初始化
-        if detector_type == "onnx":
-            self._init_onnx_detector()
-        elif detector_type == "face_alignment":
-            self._init_face_alignment()
-        else:
-            # 如果指定了不支持的检测器类型，默认使用ONNX
-            self.detector_type = "onnx"
-            self._init_onnx_detector()
-            print(f"不支持的检测器类型: {detector_type}，已切换为默认的ONNX检测器")
+        # 初始化ONNX检测器
+        self._init_onnx_detector()
     
     def _init_onnx_detector(self):
-        """初始化ONNX检测器"""
+        """初始化ONNX检测器，支持GPU加速"""
         # 检查文件是否存在
         if not os.path.exists(self.face_detector_path):
             raise FileNotFoundError(f"人脸检测模型未找到: {self.face_detector_path}")
         if not os.path.exists(self.landmark_detector_path):
             raise FileNotFoundError(f"关键点检测模型未找到: {self.landmark_detector_path}")
         
+        # 配置ONNX运行时选项，启用GPU支持
+        providers = []
+        if self.device.lower() == "cuda":
+            # 检查CUDA是否可用
+            if 'CUDAExecutionProvider' in ort.get_available_providers():
+                providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+                print("使用CUDA加速ONNX推理")
+            else:
+                print("警告: CUDA不可用，回退到CPU")
+                providers = ['CPUExecutionProvider']
+                self.device = "cpu"
+        else:
+            providers = ['CPUExecutionProvider']
+        
+        # 创建会话选项
+        session_options = ort.SessionOptions()
+        session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        
         # 初始化ONNX运行时会话
-        self.face_detector = ort.InferenceSession(self.face_detector_path)
+        self.face_detector = ort.InferenceSession(
+            self.face_detector_path, 
+            sess_options=session_options,
+            providers=providers
+        )
         self.face_detector_input_name = self.face_detector.get_inputs()[0].name
         
-        self.landmark_detector = ort.InferenceSession(self.landmark_detector_path)
+        self.landmark_detector = ort.InferenceSession(
+            self.landmark_detector_path,
+            sess_options=session_options,
+            providers=providers
+        )
+        self.landmark_detector_input_name = self.landmark_detector.get_inputs()[0].name
     
-    def _init_face_alignment(self):
-        """初始化face_alignment检测器"""
-        try:
-            import face_alignment
-            self.fa = face_alignment.FaceAlignment(
-                face_alignment.LandmarksType.TWO_D, 
-                flip_input=False, 
-                device=self.device
-            )
-        except ImportError:
-            raise ImportError("未安装face_alignment库，请使用pip install face-alignment安装")
-    
-    def detect_face(self, image: np.ndarray) -> Tuple[Optional[np.ndarray], float]:
+    def detect_face(self, image: np.ndarray) -> Optional[np.ndarray]:
         """
         检测图像中的人脸
         
@@ -84,18 +87,11 @@ class FaceLandmarkDetector:
             image: 输入图像
             
         Returns:
-            Tuple[Optional[np.ndarray], float]: 人脸边界框和检测时间
+            Optional[np.ndarray]: 人脸边界框，如果未检测到则返回None
         """
-        if self.detector_type == "onnx":
-            return self._detect_face_onnx(image)
-        elif self.detector_type == "face_alignment":
-            # face_alignment库不直接提供边界框，返回None
-            return None, 0.0
-        else:
-            # 默认使用ONNX
-            return self._detect_face_onnx(image)
+        return self._detect_face_onnx(image)
     
-    def _detect_face_onnx(self, image: np.ndarray) -> Tuple[Optional[np.ndarray], float]:
+    def _detect_face_onnx(self, image: np.ndarray) -> Optional[np.ndarray]:
         """使用ONNX模型检测人脸"""
         orig_size = image.shape
         
@@ -151,6 +147,7 @@ class FaceLandmarkDetector:
         picked_box_probs[:, 3] *= height
         return picked_box_probs[:, :4].astype(np.int32), np.array(picked_labels), picked_box_probs[:, 4]
     
+    @Timer()
     def get_landmarks(self, image: Union[np.ndarray, torch.Tensor]) -> Optional[List[np.ndarray]]:
         """
         获取图像中的面部关键点
@@ -177,15 +174,9 @@ class FaceLandmarkDetector:
             if image.max() <= 1.0:
                 image = (image * 255).astype(np.uint8)
         
-        # 根据检测器类型获取关键点
-        if self.detector_type == "onnx":
-            return self._get_landmarks_onnx(image)
-        elif self.detector_type == "face_alignment":
-            return self._get_landmarks_face_alignment(image)
-        else:
-            # 默认使用ONNX
-            return self._get_landmarks_onnx(image)
+        return self._get_landmarks_onnx(image)
     
+    @Timer()
     def _get_landmarks_onnx(self, image: np.ndarray) -> Optional[List[np.ndarray]]:
         """使用ONNX模型获取关键点"""
         # 检测人脸
@@ -199,13 +190,14 @@ class FaceLandmarkDetector:
         
         # 运行关键点检测
         face_input = face_input.astype(np.float32)
-        landmark_outputs = self.landmark_detector.run(None, {'input': face_input})
+        landmark_outputs = self.landmark_detector.run(None, {self.landmark_detector_input_name: face_input})
         
         # 处理关键点输出
         landmarks = self._process_landmark_output(landmark_outputs[0], bbox_info)
         
         return [landmarks]
     
+    @Timer()
     def _preprocess_landmark_input(self, image: np.ndarray, box: np.ndarray) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
         """预处理关键点检测的输入"""
         x1, y1, x2, y2 = box
@@ -251,20 +243,11 @@ class FaceLandmarkDetector:
         
         return landmarks
     
-    def _get_landmarks_face_alignment(self, image: np.ndarray) -> Optional[List[np.ndarray]]:
-        """使用face_alignment获取关键点"""
-        try:
-            detected_faces = self.fa.get_landmarks(image)
-            if detected_faces is None:
-                if self.enable_timing:
-                    print("未检测到人脸")
-                return None
-            return detected_faces
-        except Exception as e:
-            if self.enable_timing:
-                print(f"face_alignment检测失败: {str(e)}")
-            return None
+    def __del__(self):
+        """析构函数，释放资源"""
+        # 显式释放ONNX会话资源
+        if hasattr(self, 'face_detector'):
+            del self.face_detector
+        if hasattr(self, 'landmark_detector'):
+            del self.landmark_detector
     
-    def close(self):
-        """关闭检测器并释放资源"""
-        pass 

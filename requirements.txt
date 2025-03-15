@@ -9,7 +9,8 @@ librosa==0.10.2.post1
 matplotlib==3.10.1
 more_itertools==10.6.0
 omegaconf==2.3.0
-onnxruntime==1.20.1
+# onnxruntime==1.20.1
+onnxruntime-gpu==1.20.1
 opencv_contrib_python==4.11.0.86
 opencv_python==4.11.0.86
 packaging==24.2

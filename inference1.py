@@ -3,7 +3,7 @@ from latentsync.inference.context import LipsyncContext
 from latentsync.inference.lipsync_model import LipsyncModel
 from tqdm import tqdm
 from latentsync.inference.utils import load_audio_clips
-from latentsync.utils.image_processor import FaceProcessor
+from latentsync.utils.face_processor import FaceProcessor
 from latentsync.utils.timer import Timer
 from latentsync.utils.video import save_frames_to_video, VideoReader
 

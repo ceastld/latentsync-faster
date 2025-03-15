@@ -3,7 +3,7 @@ import numpy as np
 from tqdm import tqdm
 from latentsync.configs.config import GLOBAL_CONFIG
 from latentsync.inference.context import LipsyncContext
-from latentsync.utils.image_processor import FaceProcessor
+from latentsync.utils.face_processor import FaceProcessor
 from latentsync.utils.timer import Timer
 from latentsync.utils.video import VideoReader
 from latentsync.inference.multi_infer import MultiProcessInference

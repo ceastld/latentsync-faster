@@ -3,8 +3,9 @@ from functools import cached_property
 from latentsync.inference.context import LipsyncContext
 from latentsync.models.unet import UNet3DConditionModel
 from latentsync.pipelines.metadata import LipsyncMetadata
+from latentsync.utils.face_processor import FaceProcessor
 from latentsync.utils.affine_transform import AlignRestore
-from latentsync.utils.image_processor import FaceProcessor, ImageProcessor
+from latentsync.utils.image_processor import ImageProcessor
 from latentsync.utils.util import read_video, write_video
 import cv2
 import numpy as np
