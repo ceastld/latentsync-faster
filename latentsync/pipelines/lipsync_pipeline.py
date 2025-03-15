@@ -185,7 +185,7 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         video_capture.release()
         
         # Print timing statistics
-        Timer.print_stats()
+        Timer.summary()
         
         # Restore video frames and save results
         return self._restore_and_save_stream(

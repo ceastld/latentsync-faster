@@ -54,7 +54,7 @@ class Timer:
         return wrapper
     
     @staticmethod
-    def print_stats():
+    def summary():
         """Print statistics for all timers"""
         if not Timer._enabled:
             return

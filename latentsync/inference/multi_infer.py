@@ -149,7 +149,7 @@ class MultiThreadInference(InferenceWorker):
 class MultiProcessInference(InferenceWorker):
     warnings.filterwarnings("ignore", category=FutureWarning)
     logger = logging.getLogger("MultiProcessInference")
-    def __init__(self, num_workers=1, worker_timeout=60):
+    def __init__(self, num_workers=1, worker_timeout=60, enable_timer=False):
         """
         Initialize the multi-process inference class.
         should use `mp.set_start_method("spawn", force=True)` before using this class.
@@ -165,6 +165,7 @@ class MultiProcessInference(InferenceWorker):
         self.worker_list: List[mp.Process] = []
         self.worker_loaded_count = Value("i", 0)
         self.worker_loaded_event = mp.Event()
+        self.enable_timer = enable_timer
 
     def get_model(self):
         """
@@ -172,6 +173,7 @@ class MultiProcessInference(InferenceWorker):
         """
         raise NotImplementedError("Subclasses must implement this method.")
     
+    @Timer()
     def wait_worker_loaded(self, timeout=None):
         if self.worker_loaded_count.value > 0:
             return True
@@ -196,6 +198,8 @@ class MultiProcessInference(InferenceWorker):
         """
         Worker process function to process tasks from the queue.
         """
+        if self.enable_timer:
+            Timer.enable()
         model = self.get_model()
         self.worker_loaded_count.value += 1
         self.worker_loaded_event.set()
@@ -212,6 +216,7 @@ class MultiProcessInference(InferenceWorker):
                 traceback.print_exc()
                 break
         self.worker_loaded_count.value -= 1
+        Timer.summary()
 
     def is_alive(self):
         return any(p.is_alive() for p in self.worker_list)

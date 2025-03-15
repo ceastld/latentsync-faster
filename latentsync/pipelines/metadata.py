@@ -13,7 +13,8 @@ class LipsyncMetadata:
     box: np.ndarray
     affine_matrix: np.ndarray
     original_frame: np.ndarray
-    sync_face: np.ndarray
+    sync_face: np.ndarray = None
+    audio_feature: np.ndarray = None
 
     def set_sync_face(self, face: torch.Tensor):
         x1, y1, x2, y2 = self.box

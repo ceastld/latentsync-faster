@@ -6,7 +6,7 @@ from latentsync.inference.context import LipsyncContext
 from latentsync.utils.image_processor import FaceProcessor
 from latentsync.utils.timer import Timer
 from latentsync.utils.video import VideoReader
-from .multi_infer import MultiProcessInference
+from latentsync.inference.multi_infer import MultiProcessInference
 
 class FaceInference(MultiProcessInference):
     def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60):
@@ -15,6 +15,10 @@ class FaceInference(MultiProcessInference):
 
     def get_model(self):
         return FaceProcessor(self.context.resolution, self.context.device)
+    
+    def worker(self):
+        Timer.enable()
+        return super().worker()
     
     def infer_task(self, model: FaceProcessor, image: np.ndarray):
         return model.prepare_face(image)
@@ -26,12 +30,12 @@ async def auto_push_face(video_path: str, infer: FaceInference):
     with VideoReader(video_path) as video_reader:
         for frame in video_reader:
             infer.push_frame(frame)
-            await asyncio.sleep(0.04)
+            # await asyncio.sleep(0.04)
     infer.add_end_task()
 
 async def wait_for_results(infer: FaceInference):
     results = []
-    pbar = tqdm(total=infer.task_count, desc="Processing Face")
+    pbar = tqdm(desc="Processing Face")
     async for result in infer.result_stream():
         results.append(result)
         pbar.update(1)
@@ -44,9 +48,9 @@ async def main():
     infer.start_workers()
     await auto_push_face(GLOBAL_CONFIG.inference.default_video_path, infer)
     results = await wait_for_results(infer)
-    print(results)
+    # print(results)
 
 if __name__ == "__main__":  
     Timer.enable()
     asyncio.run(main())
-    Timer.print_stats()
+    Timer.summary()

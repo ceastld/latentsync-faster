@@ -6,6 +6,7 @@ from latentsync.inference.audio_infer import AudioProcessor
 from latentsync.inference.context import LipsyncContext
 from latentsync.inference.utils import create_diffusion_pipeline
 from latentsync.pipelines.metadata import LipsyncMetadata
+from latentsync.utils.affine_transform import AlignRestore
 from latentsync.utils.timer import Timer
 
 
@@ -42,8 +43,15 @@ class LipsyncModel:
         for i, metadata in enumerate(metadata_list):
             metadata.set_sync_face(synced_faces_batch[i])
 
-        output_frames = self.pipeline.restore_video(metadata_list)
+        output_frames = [
+            self.restorer.restore_img(metadata.original_frame, metadata.sync_face, metadata.affine_matrix)
+            for metadata in metadata_list
+        ]
         return output_frames
+
+    @cached_property
+    def restorer(self):
+        return AlignRestore()
 
     @property
     def face_processor(self):

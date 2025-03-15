@@ -8,7 +8,7 @@ from latentsync.configs.config import GLOBAL_CONFIG
 from latentsync.inference.context import LipsyncContext
 from latentsync.utils.timer import Timer
 from latentsync.whisper.whisper.audio import load_audio
-from .multi_infer import MultiProcessInference
+from latentsync.inference.multi_infer import MultiProcessInference
 
 
 class AudioProcessor:
@@ -56,8 +56,14 @@ class AudioProcessor:
 
 
 class AudioInference(MultiProcessInference):
-    def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60):
-        super().__init__(num_workers, worker_timeout)
+    def __init__(
+        self,
+        context: LipsyncContext,
+        num_workers=1,
+        worker_timeout=60,
+        enable_timer=False,
+    ):
+        super().__init__(num_workers, worker_timeout, enable_timer)
         self.context = context
 
     @Timer("audio_infer_model_init")
@@ -81,9 +87,9 @@ class AudioInference(MultiProcessInference):
             audio_samples = np.concatenate(audio_buffer)
             result = model.process_audio_with_pre(self.last_audio_samples, audio_samples)
             for i in range(len(audio_buffer)):
-                self._set_result(self.result_start_idx + i, result[i])
+                self._set_result(self.result_start_idx + i, result[i].cpu().numpy())
             self.audio_buffer = []
-            self.last_audio_samples = audio_samples[-self.context.samples_per_frame :]
+            self.last_audio_samples = audio_samples
 
     def push_audio(self, audio: np.ndarray):
         if isinstance(audio, torch.Tensor):
@@ -119,7 +125,7 @@ async def wait_for_results(infer: AudioInference):
 
 async def main():
     context = LipsyncContext()
-    infer = AudioInference(context)
+    infer = AudioInference(context, enable_timer=True)
     infer.start_workers()
     infer.wait_worker_loaded()
     await auto_push_audio(GLOBAL_CONFIG.inference.default_audio_path, infer)
@@ -132,4 +138,4 @@ async def main():
 if __name__ == "__main__":
     Timer.enable()
     asyncio.run(main())
-    Timer.print_stats()
+    Timer.summary()

@@ -253,12 +253,11 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
     def restorer(self):
         return AlignRestore()
 
-    def restore_video(self, metadata_list):
+    def restore_video(self, metadata_list: List[LipsyncMetadata]):
         """使用LipsyncMetadata恢复视频帧"""
         out_frames = []
         
-        for metadata in tqdm.tqdm(metadata_list):
-            metadata: LipsyncMetadata
+        for metadata in tqdm.tqdm(metadata_list, desc="Restoring video"):
             out_frame = self.restorer.restore_img(
                 metadata.original_frame,
                 metadata.sync_face,

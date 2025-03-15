@@ -1,12 +1,11 @@
-import numpy as np
 from latentsync.inference.audio_infer import AudioProcessor
 from latentsync.inference.context import LipsyncContext
 from latentsync.inference.lipsync_model import LipsyncModel
 from tqdm import tqdm
+from latentsync.inference.utils import load_audio_clips
 from latentsync.utils.image_processor import FaceProcessor
 from latentsync.utils.timer import Timer
 from latentsync.utils.video import save_frames_to_video, VideoReader
-from latentsync.whisper.whisper.audio import load_audio
 
 
 def run_inference(video_path: str, audio_path: str, output_path: str):
@@ -16,7 +15,6 @@ def run_inference(video_path: str, audio_path: str, output_path: str):
     lipsync_model = LipsyncModel(context)
 
     batch_size = context.num_frames
-    audio_unit = context.samples_per_frame
 
     # Load video
     video_reader = VideoReader(video_path)
@@ -24,20 +22,10 @@ def run_inference(video_path: str, audio_path: str, output_path: str):
     total_frames = video_reader.total_frames
 
     # Load audio
-    audio_samples = load_audio(audio_path)
-
-    # Calculate number of audio clips needed
-    num_audio_clips = int(np.ceil(audio_samples.shape[0] / audio_unit / batch_size) * batch_size)
-
-    # Pad audio samples if necessary
-    audio_samples = np.pad(
-        audio_samples,
-        (0, int(num_audio_clips * audio_unit - audio_samples.shape[0])),
-        mode="constant",
-    )
+    audio_clips = load_audio_clips(audio_path, context.samples_per_frame)
 
     # Limit total frames to available audio
-    total_frames = min(total_frames, num_audio_clips)
+    total_frames = min(total_frames, len(audio_clips))
 
     # Process video frames
     processed_frames = []
@@ -61,9 +49,7 @@ def run_inference(video_path: str, audio_path: str, output_path: str):
         if not batch_metadata:
             break
 
-        current_audio_samples = audio_samples[
-            int(frame_idx * audio_unit) : int((frame_idx + len(frames_batch)) * audio_unit)
-        ]
+        current_audio_samples = audio_clips[frame_idx : frame_idx + len(frames_batch)].flatten()
         batch_audio_features = audio_processor.process_audio_with_pre(last_audio_samples, current_audio_samples)
         last_audio_samples = current_audio_samples
 
@@ -88,8 +74,8 @@ if __name__ == "__main__":
     # Example usage
     video_path = "assets/obama.mp4"
     audio_path = "assets/cxk.mp3"
-    output_path = "video_out+audio_context8_batch8.mp4"
+    output_path = "output/obama_cxk1.mp4"
 
     # Timer.enable()
     run_inference(video_path, audio_path, output_path)
-    Timer.print_stats()
+    Timer.summary()

@@ -75,6 +75,10 @@ class InferenceConfig:
     @property
     def default_audio_path(self):
         return os.path.join(ASSETS_DIR, "cxk.mp3")
+    
+    @property
+    def default_video_path(self):
+        return os.path.join(ASSETS_DIR, "obama.mp4")
 
 
 GLOBAL_CONFIG = Config()

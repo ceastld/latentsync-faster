@@ -4,7 +4,6 @@ from einops import rearrange
 import torch
 import numpy as np
 from typing import List, Optional, Union, Tuple
-
 from latentsync.pipelines.metadata import LipsyncMetadata
 from latentsync.utils.timer import Timer
 from .affine_transform import AlignRestore, laplacianSmooth
