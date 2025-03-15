@@ -138,8 +138,10 @@ class AlignRestore(object):
         dtype = src_tensor.dtype
         device = src_tensor.device
         
-        center_x = dst_w / 2 
-        center_y = dst_h / 2 
+        # center_x = dst_w / 2 
+        # center_y = dst_h / 2 
+
+
         
         # 分析仿射矩阵以检测旋转类型
         # 提取旋转部分（2x2子矩阵）
@@ -159,23 +161,14 @@ class AlignRestore(object):
         # 计算缩放因子（基于旋转矩阵的平方和）
         scale = torch.sqrt(matrix[0, 0] * matrix[0, 0] + matrix[1, 0] * matrix[1, 0])
 
-        # 调整平移量以考虑缩放和旋转
-        matrix[0, 2] = matrix[0, 2] - (1 - scale) * center_x
-        matrix[1, 2] = matrix[1, 2] - (1 - scale) * center_y
- 
-        matrix = matrix / scale
+        cos_theta = matrix[0, 0] / scale
+        sin_theta = matrix[0, 1] / scale
 
-        matrix[0, 2] = matrix[0, 2] - (1 - matrix[0, 0]) * center_x + matrix[0, 1] * center_y
-        matrix[1, 2] = matrix[1, 2] - (1 - matrix[1, 1]) * center_y + matrix[1, 0] * center_x
+        t_x = matrix[0, 2] * cos_theta - matrix[1, 2] * sin_theta
+        t_y = matrix[0, 2] * sin_theta + matrix[1, 2] * cos_theta
 
-        matrix[0, 0] = matrix[0, 0] / scale
-        matrix[0, 1] = - matrix[0, 1] / scale
-        matrix[1, 0] = - matrix[1, 0] / scale
-        matrix[1, 1] = matrix[1, 1] / scale
-
-        # 计算源坐标
-        src_x = matrix[0, 0] * (x - center_x) + matrix[0, 1] * (y - center_y) + center_x - matrix[0, 2]   
-        src_y = matrix[1, 0] * (x - center_x) + matrix[1, 1] * (y - center_y) + center_y - matrix[1, 2]
+        src_x = cos_theta / scale * x - sin_theta / scale * y - t_x / scale
+        src_y = sin_theta / scale * x + cos_theta / scale * y - t_y / scale      
         
         # 处理精度问题，特别是对于旋转变换
         if has_rotation:

@@ -1,5 +1,6 @@
 # Adapted from https://github.com/TMElyralab/MuseTalk/blob/main/musetalk/whisper/audio2feature.py
 
+from typing import Union
 from .whisper import load_model
 import numpy as np
 import torch
@@ -84,7 +85,7 @@ class Audio2Feature:
         whisper_chunks = []
         whisper_idx_multiplier = 50.0 / fps
         i = 0
-        print(f"video in {fps} FPS, audio idx in 50FPS")
+        # print(f"video in {fps} FPS, audio idx in 50FPS")
 
         while True:
             start_idx = int(i * whisper_idx_multiplier)
@@ -134,7 +135,7 @@ class Audio2Feature:
 
         return audio_feat
 
-    def samples2feat(self, audio_samples):
+    def samples2feat(self, audio_samples: Union[np.ndarray, torch.Tensor]):
         """
         Convert audio samples directly to features using Whisper model
         

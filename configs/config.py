@@ -39,6 +39,7 @@ class LipsyncConfig:
     # Audio and video parameters
     audio_sample_rate = 16000
     video_fps = 25
+    samples_per_frame = int(16000 / 25)
     
     # Frame parameters
     num_frames = 8 # batch size
@@ -50,7 +51,6 @@ class LipsyncConfig:
     guidance_scale = 1.5
     weight_type = torch.float16
     eta = 0.0
-    mask = "fix_mask"
 
 GLOBAL_CONFIG = Config()
 
