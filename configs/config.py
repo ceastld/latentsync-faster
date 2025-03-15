@@ -35,6 +35,12 @@ class Config:
     def lipsync(self):
         return LipsyncConfig()
 
+def get_dtype():
+    is_fp16_supported = (
+        torch.cuda.is_available() and torch.cuda.get_device_capability()[0] > 7
+    )
+    return torch.float16 if is_fp16_supported else torch.float32
+
 class LipsyncConfig:
     # Audio and video parameters
     audio_sample_rate = 16000
@@ -49,7 +55,7 @@ class LipsyncConfig:
     # Diffusion parameters
     num_inference_steps = 3
     guidance_scale = 1.5
-    weight_type = torch.float16
+    weight_dtype = get_dtype()
     eta = 0.0
 
 GLOBAL_CONFIG = Config()

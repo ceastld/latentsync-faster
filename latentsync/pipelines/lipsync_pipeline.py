@@ -25,7 +25,7 @@ from diffusers.schedulers import (
 from diffusers.utils import logging
 from latentsync.inference.context import LipsyncContext
 from latentsync.pipelines.lipsync_diffusion_pipeline import LipsyncDiffusionPipeline
-from latentsync.pipelines.lipsync_diffusion_pipeline import LipsyncMetadata
+from latentsync.pipelines.metadata import LipsyncMetadata
 
 from ..models.unet import UNet3DConditionModel
 from ..utils.util import read_audio, check_ffmpeg_installed, write_video
@@ -48,12 +48,11 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
             EulerAncestralDiscreteScheduler,
             DPMSolverMultistepScheduler,
         ],
-        use_compile: bool = False,
+        lipsync_context: LipsyncContext,
     ):
-        super().__init__(vae, unet, scheduler, use_compile)
+        super().__init__(vae=vae, unet=unet, scheduler=scheduler, lipsync_context=lipsync_context)
         self.audio_encoder = audio_encoder
         self.register_modules(audio_encoder=audio_encoder)
-        self.set_progress_bar_config(desc="Steps")
 
     @Timer(name="prepare_audio_batch")
     def _prepare_audio_batch(self, whisper_feature: Optional[torch.Tensor], batch_idx: int, 
@@ -93,7 +92,7 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
                       batch_idx: int, context: LipsyncContext) -> Optional[List[LipsyncMetadata]]:
         """Process a single batch of frames"""
         # 1. Facial preprocessing
-        metadata_list: Optional[List[LipsyncMetadata]] = self._preprocess_face_batch(frames)
+        metadata_list: Optional[List[LipsyncMetadata]] = self.face_processor.prepare_face_batch(frames)
         
         if metadata_list is None:
             print(f"Batch {batch_idx+1} No valid face detected, skipping")
@@ -124,22 +123,9 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         video_path: str,
         audio_path: str,
         video_out_path: str,
-        video_mask_path: str = None,
-        context: Optional[LipsyncContext] = None,
-        **kwargs,
     ):
         """Execute lip sync inference, using stream processing for video frames"""
-        # Save model training state and set to evaluation mode
-        is_train = self.unet.training
-        self.unet.eval()
-
-        # Initialize context if not provided
-        if context is None:
-            context = LipsyncContext(**kwargs)
-        
-        # Initialize parameters
-        check_ffmpeg_installed()
-        self.init_with_context(context)
+        context = self.lipsync_context
         
         # Prepare audio features (process all audio at once)
         audio_samples = read_audio(audio_path)

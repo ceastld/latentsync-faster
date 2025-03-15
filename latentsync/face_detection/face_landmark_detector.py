@@ -16,8 +16,7 @@ class FaceLandmarkDetector:
                  device: str = "cpu", 
                  detector_type: str = "onnx",
                  face_detector_path: Optional[str] = None,
-                 landmark_detector_path: Optional[str] = None,
-                 enable_timing: bool = False):
+                 landmark_detector_path: Optional[str] = None):
         """
         初始化人脸关键点检测器
         

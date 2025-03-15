@@ -2,9 +2,11 @@ import numpy as np
 import cv2
 from latentsync.inference.context import LipsyncContext
 from latentsync.inference.lipsync_model import LipsyncModel
-from latentsync.pipelines.lipsync_diffusion_pipeline import LipsyncMetadata
+from latentsync.pipelines.metadata import LipsyncMetadata
 import torch
 from tqdm import tqdm
+from latentsync.utils.image_processor import FaceProcessor
+from latentsync.utils.timer import Timer
 from latentsync.utils.util import read_audio
 from latentsync.utils.video import save_frames_to_video, video_stream
 from latentsync.whisper.whisper.audio import load_audio
@@ -12,9 +14,8 @@ from latentsync.whisper.whisper.audio import load_audio
 
 def run_inference(video_path: str, audio_path: str, output_path: str):
     # Initialize model and context
-    model = LipsyncModel(device="cuda")
     context = LipsyncContext()
-    model.infer_setup(context)
+    model = LipsyncModel(context=context)
 
     batch_size = context.num_frames
     samples_per_frame = context.samples_per_frame
@@ -45,35 +46,34 @@ def run_inference(video_path: str, audio_path: str, output_path: str):
     # Process video frames
     processed_frames = []
     frame_idx = 0
-    pbar = tqdm(total=total_frames, desc="Processing frames")
     
     # Keep track of last processed audio for context
     last_audio_samples = None
 
+    face_processor = FaceProcessor(resolution=context.resolution, device=context.device)
+    
+    pbar = tqdm(total=total_frames, desc="Processing frames")
+
     while frame_idx < total_frames:
         # Process batch_size frames
         batch_metadata = []
-        frames_in_batch = 0
         
-        for _ in range(batch_size):
-            if frame_idx + frames_in_batch >= total_frames:
-                break
-
+        frames_batch = []
+        for _ in range(min(batch_size, total_frames - frame_idx)):
             ret, frame = cap.read()
             if not ret:
                 break
-                
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            metadata = model.process_frame(frame)
-            batch_metadata.append(metadata)
-            frames_in_batch += 1
+            frames_batch.append(frame)
+
+        batch_metadata = face_processor.prepare_face_batch(frames_batch)
 
         if not batch_metadata:
             break
         
         # Calculate audio sample indices for current batch
         start_sample = int(frame_idx * samples_per_frame)
-        end_sample = int((frame_idx + frames_in_batch) * samples_per_frame)
+        end_sample = int((frame_idx + len(frames_batch)) * samples_per_frame)
         
         # Process audio features for current batch
         batch_audio_features = []
@@ -98,8 +98,8 @@ def run_inference(video_path: str, audio_path: str, output_path: str):
         )
 
         processed_frames.extend(output_frames)
-        frame_idx += frames_in_batch
-        pbar.update(frames_in_batch)
+        frame_idx += len(frames_batch)
+        pbar.update(len(frames_batch))
 
     pbar.close()
     cap.release()
@@ -115,4 +115,6 @@ if __name__ == "__main__":
     audio_path = "assets/cxk.mp3"
     output_path = "video_out+audio_context8_batch8.mp4"
 
+    # Timer.enable()
     run_inference(video_path, audio_path, output_path)
+    Timer.print_stats()

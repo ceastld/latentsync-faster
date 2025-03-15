@@ -9,87 +9,99 @@ from diffusers import AutoencoderTiny, DPMSolverMultistepScheduler
 from latentsync.inference.context import LipsyncContext
 from latentsync.models.unet import UNet3DConditionModel
 from latentsync.pipelines import (
-    LipsyncMetadata,
     LipsyncPipeline,
     LipsyncDiffusionPipeline,
 )
 
 from diffusers.utils.import_utils import is_xformers_available
+from latentsync.pipelines.metadata import LipsyncMetadata
+from latentsync.utils.timer import Timer
 from latentsync.utils.util import check_ffmpeg_installed
 from latentsync.whisper.audio2feature import Audio2Feature
 from configs.config import GLOBAL_CONFIG
 
 
-def get_lipsync_pipeline(dtype, device, use_compile=False) -> LipsyncPipeline:
-    check_ffmpeg_installed()
+class ModelWrapper:
+    def __init__(self, context: LipsyncContext):
+        self.context = context
 
-    config = GLOBAL_CONFIG.unet_config
+    @property
+    def device(self):
+        return self.context.device
 
-    scheduler = DPMSolverMultistepScheduler.from_pretrained(
-        GLOBAL_CONFIG.config_dir, algorithm_type="dpmsolver++", solver_order=1
-    )
-
-    audio_encoder = Audio2Feature(
-        model_path=GLOBAL_CONFIG.whisper_model_path,
-        device="cuda",
-        num_frames=config.data.num_frames,
-    )
-    vae = AutoencoderTiny.from_pretrained("madebyollin/taesd", torch_dtype=dtype)
-    vae.config.scaling_factor = 1.0
-    vae.config.shift_factor = 0
-
-    unet, _ = UNet3DConditionModel.from_pretrained(
-        OmegaConf.to_container(config.model),
-        GLOBAL_CONFIG.latentsync_unet_path,
-        device="cpu",
-    )
-
-    unet = unet.to(dtype=dtype)
-
-    # set xformers
-    if is_xformers_available():
-        unet.enable_xformers_memory_efficient_attention()
-
-    pipeline: LipsyncPipeline = LipsyncPipeline(
-        vae=vae,
-        audio_encoder=audio_encoder,
-        unet=unet,
-        scheduler=scheduler,
-        use_compile=use_compile,
-    ).to(device)
-
-    pipeline.unet.eval()
-
-    return pipeline
-
-
-class LipsyncModel:
-    def __init__(self, device: str = "cuda"):
-        self.device = device
-        self.lipsync_context: LipsyncContext = None
-        # 存储上一个音频 batch 的数据，用于流式处理
-        self.previous_audio_batch = None
-        self.previous_audio_features = None
+    @property
+    def dtype(self):
+        return self.context.weight_dtype
 
     @cached_property
-    def dtype(self):
-        is_fp16_supported = (
-            torch.cuda.is_available() and torch.cuda.get_device_capability()[0] > 7
+    def audio_encoder(self):
+        return Audio2Feature(
+            model_path=GLOBAL_CONFIG.whisper_model_path,
+            device=self.device,
+            num_frames=self.context.num_frames,
         )
-        return torch.float16 if is_fp16_supported else torch.float32
+
+    @cached_property
+    def unet(self):
+        unet, _ = UNet3DConditionModel.from_pretrained(
+            OmegaConf.to_container(GLOBAL_CONFIG.unet_config.model),
+            GLOBAL_CONFIG.latentsync_unet_path,
+            device=self.device,
+        )
+        if is_xformers_available():
+            unet.enable_xformers_memory_efficient_attention()
+        return unet.eval().to(dtype=self.dtype)
+
+    @cached_property
+    def vae(self):
+        vae = AutoencoderTiny.from_pretrained(
+            "madebyollin/taesd", torch_dtype=self.dtype
+        )
+        vae.config.scaling_factor = 1.0
+        vae.config.shift_factor = 0
+        return vae
+
+    @cached_property
+    def scheduler(self):
+        return DPMSolverMultistepScheduler.from_pretrained(
+            GLOBAL_CONFIG.config_dir, algorithm_type="dpmsolver++", solver_order=1
+        )
 
     @cached_property
     def pipeline(self):
-        return get_lipsync_pipeline(self.dtype, self.device)
+        return LipsyncPipeline(
+            vae=self.vae,
+            audio_encoder=self.audio_encoder,
+            unet=self.unet,
+            scheduler=self.scheduler,
+            lipsync_context=self.context,
+        ).to(self.device)
 
-    def infer_setup(self, lipsync_context: LipsyncContext):
-        self.pipeline.init_with_context(lipsync_context)
-        self.lipsync_context = lipsync_context
+    @cached_property
+    def diffusion_pipeline(self):
+        return LipsyncDiffusionPipeline(
+            vae=self.vae,
+            audio_encoder=self.audio_encoder,
+            unet=self.unet,
+            scheduler=self.scheduler,
+            lipsync_context=self.context,
+        ).to(self.device)
 
-    @torch.no_grad()
-    def _extract_faces(self, metadata_list: List[LipsyncMetadata]) -> torch.Tensor:
-        """Extract processed faces from metadata and stack them into a batch."""
-        return torch.stack([metadata.face for metadata in metadata_list])
+
+def get_lipsync_pipeline(context: LipsyncContext) -> LipsyncPipeline:
+    check_ffmpeg_installed()
+    wrapper = ModelWrapper(context=context)
+    return wrapper.pipeline
+
+
+class LipsyncModel:
+    def __init__(self, context: LipsyncContext):
+        self.context: LipsyncContext = context
+        self.pipeline = get_lipsync_pipeline(context)
+
+    @property
+    def device(self):
+        return self.context.device
 
     @torch.no_grad()
     def process_audio(
@@ -106,8 +118,10 @@ class LipsyncModel:
         # Align audio features with the number of faces
         return self.align_audio_features(audio_features, num_faces)
 
+    @Timer()
+    @torch.no_grad()
     def process_audio_with_pre(self, pre_audio_samples, audio_samples):
-        samples_per_frame = self.lipsync_context.samples_per_frame
+        samples_per_frame = self.context.samples_per_frame
         num_frames = int(np.ceil(len(audio_samples) / samples_per_frame))
         combined_samples = np.concatenate([pre_audio_samples, audio_samples])
         combined_features = self.process_audio(combined_samples)
@@ -136,55 +150,43 @@ class LipsyncModel:
     def _run_diffusion(
         self, faces: torch.Tensor, audio_features: Optional[List[torch.Tensor]]
     ) -> torch.Tensor:
-        """Run the diffusion model to generate synced faces."""
         synced_faces_batch, _ = self.pipeline._run_diffusion_batch(
-            faces, audio_features, self.lipsync_context
+            faces, audio_features, self.context
         )
         return synced_faces_batch
 
-    @torch.no_grad()
-    def process_frame(self, frame: np.ndarray):
-        """Process a single frame to extract face metadata."""
-        return self.pipeline._preprocess_face(frame)
-
+    @Timer()
     @torch.no_grad()
     def process_batch(
         self,
         metadata_list: List[LipsyncMetadata],
         audio_features: Optional[List[torch.Tensor]],
     ):
-        """Process a batch of frames with corresponding audio samples."""
-        assert metadata_list is not None
-        assert self.lipsync_context is not None
-
-        # 1. Extract processed faces from metadata
-        faces = self._extract_faces(metadata_list)
-
-        # 2. Process audio for this batch
+        faces = torch.stack([metadata.face for metadata in metadata_list])
         audio_features = self.align_audio_features(audio_features, len(faces))
 
-        # 3. Run diffusion inference
         synced_faces_batch = self._run_diffusion(faces, audio_features)
 
-        # 4. Update metadata with processed faces
         for i, metadata in enumerate(metadata_list):
             metadata.set_sync_face(synced_faces_batch[i])
 
-        # 5. Restore processed frames
         output_frames = self.pipeline.restore_video(metadata_list)
-
         return output_frames
+
+    @cached_property
+    def face_processor(self):
+        return self.pipeline.face_processor
 
     @torch.no_grad()
     def process_video(self, video_frames: List[np.ndarray], audio_samples: np.ndarray):
         """Process a video with corresponding audio samples."""
-        assert self.lipsync_context is not None
+        assert self.context is not None
 
         # 1. Process audio samples
         audio_features = self.process_audio(audio_samples, len(video_frames))
 
         # 2. Define batch size based on context
-        batch_size = self.lipsync_context.num_frames
+        batch_size = self.context.num_frames
 
         # 3. Process video frames in batches
         for i in range(0, len(video_frames), batch_size):
@@ -197,7 +199,7 @@ class LipsyncModel:
             )
 
             # Preprocess frames to get metadata
-            metadata_list = self.pipeline._preprocess_face_batch(batch_frames)
+            metadata_list = self.face_processor.prepare_face_batch(batch_frames)
 
             # Skip batch if no faces were detected
             if not metadata_list:
@@ -217,11 +219,3 @@ class LipsyncModel:
             print(
                 f"Processed batch {i//batch_size + 1}/{(len(video_frames) + batch_size - 1) // batch_size}"
             )
-
-    def reset_stream(self):
-        """
-        Reset the audio stream processing state.
-        Call this method when starting to process a new audio stream.
-        """
-        self.previous_audio_batch = None
-        self.previous_audio_features = None

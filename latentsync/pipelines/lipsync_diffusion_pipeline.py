@@ -1,13 +1,14 @@
-from dataclasses import dataclass
+from functools import cached_property
 from latentsync.inference.context import LipsyncContext
 from latentsync.models.unet import UNet3DConditionModel
-from latentsync.utils.image_processor import ImageProcessor
+from latentsync.pipelines.metadata import LipsyncMetadata
+from latentsync.utils.affine_transform import AlignRestore
+from latentsync.utils.image_processor import FaceProcessor, ImageProcessor
 from latentsync.utils.util import read_video, write_video
 import cv2
 import numpy as np
 import soundfile as sf
 import torch
-import torchvision
 import tqdm
 from diffusers import DiffusionPipeline
 from diffusers.configuration_utils import FrozenDict
@@ -22,27 +23,7 @@ import shutil
 import subprocess
 import time
 from typing import Callable, List, Optional, Union
-from ..utils.timer import Timer
-
-
-@dataclass
-class LipsyncMetadata:
-    face: np.ndarray
-    box: np.ndarray
-    affine_matrice: np.ndarray
-    original_frame: np.ndarray
-    sync_face: np.ndarray
-
-    def set_sync_face(self, face: torch.Tensor):
-        x1, y1, x2, y2 = self.box
-        height = int(y2 - y1)
-        width = int(x2 - x1)
-        # 调整人脸大小
-        face = torchvision.transforms.functional.resize(face, size=(height, width), antialias=True)
-        face = rearrange(face, "c h w -> h w c")
-        face = (face / 2 + 0.5).clamp(0, 1)
-        face = (face * 255).to(torch.uint8).cpu().numpy()
-        self.sync_face = face
+from latentsync.utils.timer import Timer
 
 
 class LipsyncDiffusionPipeline(DiffusionPipeline):
@@ -59,7 +40,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
             EulerAncestralDiscreteScheduler,
             DPMSolverMultistepScheduler,
         ],
-        use_compile: bool = False,
+        lipsync_context: LipsyncContext,
     ):
         super().__init__()
 
@@ -115,7 +96,9 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         # self.audio_encoder = audio_encoder # for code compilation
         self.vae = vae # for code compilation
         self.scheduler = scheduler # for code compilation
-        if use_compile:
+        self.lipsync_context = lipsync_context
+
+        if lipsync_context.use_compile:
             vae = torch.compile(vae, mode="reduce-overhead", fullgraph=True)
             unet = torch.compile(unet, mode="reduce-overhead", fullgraph=True)
 
@@ -123,9 +106,12 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
             vae=vae,
             unet=unet,
             scheduler=scheduler,
+            lipsync_context=lipsync_context,
         )
 
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
+
+        self.init_with_context(lipsync_context)
 
     def enable_vae_slicing(self):
         self.vae.enable_slicing()
@@ -252,12 +238,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
         return image_latents
 
-    def set_progress_bar_config(self, **kwargs):
-        if not hasattr(self, "_progress_bar_config"):
-            self._progress_bar_config = {}
-        self._progress_bar_config.update(kwargs)
-
-    @Timer(name="paste_surrounding_pixels")
+    @Timer()
     def paste_surrounding_pixels_back(self, decoded_latents, pixel_values, masks):
         # Paste the surrounding pixels back, because we only want to change the mouth region
         # pixel_values = pixel_values.to(device=device, dtype=weight_dtype)
@@ -272,37 +253,10 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         images = (pixel_values * 255).to(torch.uint8)
         images = images.cpu().numpy()
         return images
-
-    def affine_transform_video(self, video_path):
-        """使用LipsyncMetadata处理视频帧"""
-        video_frames = read_video(video_path, use_decord=False)
-        metadata_list = []
-
-        print(f"Affine transforming {len(video_frames)} faces...")
-        for frame in tqdm.tqdm(video_frames):
-            try:
-                face, box, affine_matrix = self.image_processor.affine_transform(frame)
-
-                # 创建LipsyncMetadata对象存储处理结果
-                metadata = LipsyncMetadata(
-                    face=face,
-                    box=box,
-                    affine_matrice=affine_matrix,
-                    original_frame=frame,
-                    sync_face=None  # 初始化为None，后续会更新
-                )
-                metadata_list.append(metadata)
-            except Exception as e:
-                print(f"Face preprocessing failed: {e}")
-                # 如果处理失败且有其他成功处理的帧，使用前一帧的结果
-                if len(metadata_list) > 0:
-                    metadata_list.append(metadata_list[-1])
-                # 否则跳过此帧
-
-        if len(metadata_list) == 0:
-            return None
-
-        return metadata_list
+    
+    @cached_property
+    def restorer(self):
+        return AlignRestore()
 
     def restore_video(self, metadata_list):
         """使用LipsyncMetadata恢复视频帧"""
@@ -310,10 +264,10 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         
         for metadata in tqdm.tqdm(metadata_list):
             metadata: LipsyncMetadata
-            out_frame = self.image_processor.restorer.restore_img(
+            out_frame = self.restorer.restore_img(
                 metadata.original_frame,
                 metadata.sync_face,
-                metadata.affine_matrice
+                metadata.affine_matrix
             )
             out_frames.append(out_frame)
 
@@ -350,16 +304,14 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
         return frames, is_last_batch
 
+    @cached_property
+    def face_processor(self):
+        return FaceProcessor(resolution=self.lipsync_context.height, device=self.lipsync_context.device)
+
+
     @Timer(name="preprocess_face")
-    def _preprocess_face(self, frame: np.ndarray) -> Optional[LipsyncMetadata]:
-        face, box, affine_matrix = self.image_processor.affine_transform(frame)
-        return LipsyncMetadata(
-            face=face,
-            box=box,
-            affine_matrice=affine_matrix,
-            original_frame=frame,
-            sync_face=None
-        )
+    def preprocess_face(self, frame: np.ndarray) -> Optional[LipsyncMetadata]:
+        return self.face_processor.prepare_face(frame)
 
     @Timer(name="preprocess_face_batch")
     def _preprocess_face_batch(self, frames: List[np.ndarray]) -> Optional[List[LipsyncMetadata]]:
@@ -373,7 +325,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         # Use the same preprocessing logic as original code
         for frame in frames:
             try:
-                metadata = self._preprocess_face(frame)
+                metadata = self.face_processor.prepare_face(frame)
                 metadata_list.append(metadata)
             except Exception as e:
                 print(f"Face preprocessing failed: {e}")
@@ -436,7 +388,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
         # 4. Prepare face masks
         pixel_values, masked_pixel_values, masks = self.image_processor.prepare_masks_and_masked_images(
-            faces, affine_transform=False
+            faces
         )
 
         pixel_values = pixel_values.to(context.device, dtype=context.weight_dtype)
@@ -524,15 +476,15 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         subprocess.run(command, shell=True)
 
         return video_out_path
+    
+    @cached_property
+    def image_processor(self):
+        return ImageProcessor(self.lipsync_context.height, device=self.device)
 
-    @Timer()
     def init_with_context(self, context: LipsyncContext):
         """Initialize and validate parameters needed for inference"""
         # Get device
         device = self._execution_device
-        
-        # Initialize image processor
-        self.image_processor = ImageProcessor(context.height, device=device)
 
         # Set height and width
         context.height = context.height or self.unet.config.sample_size * self.vae_scale_factor

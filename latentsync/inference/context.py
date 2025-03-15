@@ -12,12 +12,12 @@ class LipsyncContext:
     num_frames: int = GLOBAL_CONFIG.lipsync.num_frames
     height: int = GLOBAL_CONFIG.lipsync.height
     width: int = GLOBAL_CONFIG.lipsync.width
+    resolution: int = GLOBAL_CONFIG.lipsync.width
     samples_per_frame: int = GLOBAL_CONFIG.lipsync.samples_per_frame
 
     # Inference parameters
     num_inference_steps: int = GLOBAL_CONFIG.lipsync.num_inference_steps
     guidance_scale: float = GLOBAL_CONFIG.lipsync.guidance_scale
-    weight_type: str = GLOBAL_CONFIG.lipsync.weight_type
     eta: float = GLOBAL_CONFIG.lipsync.eta
 
     # Optional parameters
@@ -26,20 +26,19 @@ class LipsyncContext:
     callback_steps: int = 1
 
     # Runtime parameters
-    device: str = "cuda"
-    weight_dtype: torch.dtype = torch.float16
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    weight_dtype: torch.dtype = GLOBAL_CONFIG.lipsync.weight_dtype
     batch_size: int = 1
     do_classifier_free_guidance: bool = None
     num_channels_latents: int = None
     extra_step_kwargs: dict = None
 
+    use_compile: bool = False
+
     def __post_init__(self):
         # Set do_classifier_free_guidance based on guidance_scale
         self.do_classifier_free_guidance = self.guidance_scale > 1.0
 
-        # Convert weight_type string to torch.dtype
-        if isinstance(self.weight_type, str):
-            self.weight_dtype = getattr(torch, self.weight_type)
 
     def to_dict(self) -> dict:
         """Convert context to dictionary for easy access"""
