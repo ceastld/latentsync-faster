@@ -27,7 +27,7 @@ class AudioProcessor:
         # Align audio features with the number of faces
         return self.align_audio_features(audio_features, num_faces)
 
-    @Timer()
+    # @Timer()
     @torch.no_grad()
     def process_audio_with_pre(self, pre_audio_samples, audio_samples):
         samples_per_frame = self.context.samples_per_frame

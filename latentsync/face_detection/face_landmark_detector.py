@@ -105,6 +105,8 @@ class FaceLandmarkDetector:
         image = image.astype(np.float32)
         
         # 运行检测器
+        # 关键耗时点：首次运行70ms，后续运行10ms
+        # with Timer("face_detector"):
         confidences, boxes = self.face_detector.run(None, {self.face_detector_input_name: image})
         
         # 获取边界框

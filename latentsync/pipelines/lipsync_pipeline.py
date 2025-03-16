@@ -47,7 +47,7 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         self.audio_encoder = audio_encoder
         self.register_modules(audio_encoder=audio_encoder)
 
-    @Timer(name="prepare_audio_batch")
+    # @Timer(name="prepare_audio_batch")
     def _prepare_audio_batch(self, whisper_feature: Optional[torch.Tensor], batch_idx: int, 
                            num_frames_in_batch: int, context: LipsyncContext) -> Optional[List[torch.Tensor]]:
         """Prepare audio features for the current batch"""
@@ -85,27 +85,31 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
                       batch_idx: int, context: LipsyncContext) -> Optional[List[LipsyncMetadata]]:
         """Process a single batch of frames"""
         # 1. Facial preprocessing
-        metadata_list: Optional[List[LipsyncMetadata]] = self.face_processor.prepare_face_batch(frames)
-        
-        if metadata_list is None:
-            print(f"Batch {batch_idx+1} No valid face detected, skipping")
-            return None
+        with Timer("facial_preprocessing"):
+            metadata_list: Optional[List[LipsyncMetadata]] = self.face_processor.prepare_face_batch(frames)
             
-        faces = torch.stack([metadata.face for metadata in metadata_list])
+            if metadata_list is None:
+                print(f"Batch {batch_idx+1} No valid face detected, skipping")
+                return None
+                
+            faces = torch.stack([metadata.face for metadata in metadata_list])
         
         # 2. Prepare audio features for the current batch
-        current_audio_features = self._prepare_audio_batch(
-            whisper_feature, batch_idx, len(faces), context
-        )
+        with Timer("prepare_audio_features"):
+            current_audio_features = self._prepare_audio_batch(
+                whisper_feature, batch_idx, len(faces), context
+            )
         
         # 3. Run diffusion inference on the current batch
-        synced_faces_batch, _ = self._run_diffusion_batch(
-            faces, current_audio_features, context
-        )
+        with Timer("diffusion_inference"):
+            synced_faces_batch, _ = self._run_diffusion_batch(
+                faces, current_audio_features, context
+            )
         
         # 4. 更新metadata_list中的face字段，存储处理后的人脸
-        for i, metadata in enumerate(metadata_list):
-            metadata.set_sync_face(synced_faces_batch[i])
+        with Timer("update_metadata"):
+            for i, metadata in enumerate(metadata_list):
+                metadata.set_sync_face(synced_faces_batch[i])
             
         return metadata_list
         

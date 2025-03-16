@@ -22,6 +22,9 @@ def main(args):
     )
 
     print(f"Output video path: {args.video_out_path}")
+    
+    # 打印Timer统计结果
+    Timer.summary()
 
 
 if __name__ == "__main__":

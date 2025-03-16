@@ -16,6 +16,7 @@ class Timer:
         """
         self.name = name
         self.print_args = print_args
+        self.start_time = None
     
     def __call__(self, func):
         if self.name is None:
@@ -52,6 +53,38 @@ class Timer:
             return result
             
         return wrapper
+    
+    def __enter__(self):
+        """支持上下文管理器协议的入口方法"""
+        if not Timer._enabled:
+            return self
+        self.start_time = time.time()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """支持上下文管理器协议的退出方法"""
+        if not Timer._enabled or self.start_time is None:
+            return
+            
+        elapsed_time = time.time() - self.start_time
+        
+        if self.name not in Timer._stats:
+            Timer._stats[self.name] = {
+                'count': 0,
+                'total_time': 0,
+                'min_time': float('inf'),
+                'max_time': float('-inf'),
+                'time_records': []
+            }
+        
+        stats = Timer._stats[self.name]
+        stats['count'] += 1
+        stats['total_time'] += elapsed_time
+        stats['min_time'] = min(stats['min_time'], elapsed_time)
+        stats['max_time'] = max(stats['max_time'], elapsed_time)
+        stats['time_records'].append(elapsed_time)
+        
+        print(f"[Timer] {self.name} - Time: {elapsed_time*1000:.2f}ms")
     
     @staticmethod
     def summary():

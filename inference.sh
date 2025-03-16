@@ -1,5 +1,5 @@
 #!/bin/bash
-ml CUDA/12.4.0
+# ml CUDA/12.4.0
 
 python -m inference \
     --video_path "assets/obama.mp4" \

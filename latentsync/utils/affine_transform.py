@@ -255,7 +255,8 @@ class AlignRestore(object):
         aligned_face, affine_matrix = self.align_warp_face(img, lmk_align, smooth)
         restored_img = self.restore_img(img, aligned_face, affine_matrix)
         return aligned_face, restored_img
-
+    
+    # @Timer()
     def align_warp_face(self, img, lmks3, smooth=True, border_mode="constant"):
         # 计算仿射变换矩阵
         affine_matrix, self.p_bias = transformation_from_points(lmks3, self.face_template, smooth, self.p_bias)
@@ -268,14 +269,20 @@ class AlignRestore(object):
             border_mode = cv2.BORDER_REFLECT
 
         # 应用仿射变换
+        
+        img_t = img
         cropped_face = cv2.warpAffine(
-            img,
+        # img_t = self.to_tensor(img)
+        # cropped_face = self.warp_affine_tensor(
+            img_t,
             affine_matrix,
             self.face_size,
-            flags=cv2.INTER_LANCZOS4,
-            borderMode=border_mode,
-            borderValue=[127, 127, 127],
+            # flags=cv2.INTER_LANCZOS4,
+            # borderMode=border_mode,
+            # borderValue=[127, 127, 1275],
         )
+
+        # cropped_face = cropped_face.permute(2, 1, 0).to(torch.uint8).cpu().numpy()
         
         return cropped_face, affine_matrix
 
@@ -292,7 +299,7 @@ class AlignRestore(object):
         )
         return cropped_face, affine_matrix
     
-    @Timer()
+    # @Timer()
     def restore_img(self, input_img, face, affine_matrix):
         """
         还原图像的主函数，根据配置选择CPU或GPU版本的实现
@@ -391,7 +398,8 @@ class AlignRestore(object):
         
         # 步骤3: 应用反向仿射变换
         # 转换face到PyTorch并上传到GPU
-        face_t = self.to_tensor(face)
+        # face_t = self.to_tensor(face)
+        face_t = face.permute(2, 0, 1).half()
         
         # 使用PyTorch执行仿射变换
         inv_restored_t = self.warp_affine_tensor(face_t, inverse_affine, (h_up, w_up))

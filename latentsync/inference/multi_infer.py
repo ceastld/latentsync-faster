@@ -207,7 +207,7 @@ class MultiThreadInference(InferenceWorker):
             with self.counter_lock:
                 self.task_complete_counter += 1
 
-    @Timer()
+    # @Timer()
     def wait_worker_loaded(self, timeout=None):
         if self.worker_loaded_count > 0:
             return True
@@ -339,7 +339,7 @@ class MultiProcessInference(InferenceWorker):
         """
         raise NotImplementedError("Subclasses must implement this method.")
     
-    @Timer()
+    # @Timer()
     def wait_worker_loaded(self, timeout=None):
         if self.worker_loaded_count.value > 0:
             return True
