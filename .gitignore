@@ -44,3 +44,4 @@ wandb/
 /checkpoints/
 !/assets/*
 *.egg-info/
+.gradio/

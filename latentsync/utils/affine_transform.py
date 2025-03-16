@@ -6,6 +6,8 @@ import torch
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 
+from latentsync.utils.timer import Timer
+
 
 def transformation_from_points(points1, points0, smooth=True, p_bias=None):
     points2 = np.array(points0)
@@ -289,7 +291,8 @@ class AlignRestore(object):
             img, affine_matrix, self.face_size, borderMode=border_mode, borderValue=(135, 133, 132)
         )
         return cropped_face, affine_matrix
-
+    
+    @Timer()
     def restore_img(self, input_img, face, affine_matrix):
         """
         还原图像的主函数，根据配置选择CPU或GPU版本的实现

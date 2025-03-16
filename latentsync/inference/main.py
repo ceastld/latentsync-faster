@@ -110,7 +110,7 @@ class LatentSyncInference:
             worker.add_end_task()
 
 
-async def auto_push_data(video_path, audio_path, model: LatentSyncInference, max_frames: int = 200):
+async def auto_push_data(video_path, audio_path, model: LatentSyncInference, max_frames: int = 400):
     audio_clips = load_audio_clips(audio_path, model.context.samples_per_frame)
     for i, frame in enumerate(cycle_video_stream(video_path, max_frames)):
         model.push_frame(frame)
@@ -134,16 +134,18 @@ async def main():
     model = LatentSyncInference(context)
     model.wait_loaded()
     model.start_processing()
-    audio_path = GLOBAL_CONFIG.inference.default_audio_path
+    infer_package = GLOBAL_CONFIG.inference.obama
+    audio_path = infer_package.audio_path
     asyncio.create_task(
         auto_push_data(
-            GLOBAL_CONFIG.inference.default_video_path,
+            infer_package.video_path,
             audio_path,
             model,
         )
     )
     results = await wait_for_results(model)
-    save_frames_to_video(results, "output/output.mp4", audio_path=audio_path)
+    save_frames_to_video(results, infer_package.video_out_path, audio_path=audio_path)
+    print(f"Saved to {infer_package.video_out_path}")
 
     model.stop_workers()
 

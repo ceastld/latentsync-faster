@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from functools import cached_property
 import os
 import torch
@@ -8,6 +9,7 @@ ROOT_DIR = Path(__file__).parent.parent.parent
 CHECKPOINT_DIR = str(ROOT_DIR / "checkpoints")
 ASSETS_DIR = str(ROOT_DIR / "assets")
 CONFIG_DIR = os.path.dirname(__file__)
+OUTPUT_DIR = str(ROOT_DIR / "output")
 
 
 class Config:
@@ -72,15 +74,37 @@ class LipsyncConfig:
     eta = 0.0
 
 
-class InferenceConfig:
+@dataclass
+class InferPackage:
+    video_path: str
+    audio_path: str
+    video_out_path: str
 
+
+class InferenceConfig:
     @property
     def default_audio_path(self):
-        return os.path.join(ASSETS_DIR, "cxk.mp3")
-    
+        return self.obama.audio_path
+
     @property
     def default_video_path(self):
-        return os.path.join(ASSETS_DIR, "obama.mp4")
+        return self.obama.video_path
+
+    @cached_property
+    def obama(self):
+        return InferPackage(
+            video_path=os.path.join(ASSETS_DIR, "obama.mp4"),
+            audio_path=os.path.join(ASSETS_DIR, "cxk.mp3"),
+            video_out_path=os.path.join(OUTPUT_DIR, "obama_cxk.mp4"),
+        )
+
+    @property
+    def demo1(self):
+        return InferPackage(
+            video_path=os.path.join(ASSETS_DIR, "demo1_video.mp4"),
+            audio_path=os.path.join(ASSETS_DIR, "demo1_audio.wav"),
+            video_out_path=os.path.join(OUTPUT_DIR, "demo1_out.mp4"),
+        )
 
 
 GLOBAL_CONFIG = Config()
