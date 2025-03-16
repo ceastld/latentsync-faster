@@ -5,13 +5,14 @@ from typing import Set
 import numpy as np
 from tqdm import tqdm
 from latentsync.configs.config import GLOBAL_CONFIG
-from latentsync.inference.lipsync_infer import LipsyncInference
+from latentsync.inference.lipsync_infer import LipsyncInference, LipsyncRestore
 from latentsync.inference.audio_infer import AudioInference
 from latentsync.inference.context import LipsyncContext
 from latentsync.inference.face_infer import FaceInference
 from latentsync.inference.multi_infer import MultiThreadInference
 from latentsync.inference.utils import load_audio_clips
 from latentsync.pipelines.metadata import LipsyncMetadata
+from latentsync.utils.affine_transform import AlignRestore
 from latentsync.utils.timer import Timer
 from latentsync.utils.video import cycle_video_stream, VideoReader, save_frames_to_video
 
@@ -26,10 +27,13 @@ class LatentSyncInference:
 
         self.lipsync_model = LipsyncInference(context=context, worker_timeout=worker_timeout)
         self.lipsync_model.start_workers()
+        self.lipsync_model.wait_worker_loaded()
         self.face_model = FaceInference(context=context, worker_timeout=worker_timeout)
         self.face_model.start_workers()
         self.audio_model = AudioInference(context=context, worker_timeout=worker_timeout)
         self.audio_model.start_workers()
+        self.lipsync_restore = LipsyncRestore(context=context, worker_timeout=worker_timeout)
+        self.lipsync_restore.start_workers()
         self.stopped = False
 
     @property
@@ -38,7 +42,6 @@ class LatentSyncInference:
             if isinstance(v, MultiThreadInference):
                 yield v
 
-    # @Timer()
     def wait_loaded(self):
         for worker in self.workers:
             worker.wait_worker_loaded()
@@ -70,10 +73,10 @@ class LatentSyncInference:
         )
 
     def start_processing(self):
-        # self.create_task(self.)
         self.create_task(self.process_face())
         self.create_task(self.process_audio())
         self.create_task(self.push_data_to_lipsync())
+        self.create_task(self.push_data_to_lipsync_restore())
 
     async def process_face(self):
         pbar = tqdm(desc="Processing face")
@@ -101,21 +104,40 @@ class LatentSyncInference:
             metadata.audio_feature = audio_feature
             self.lipsync_model.push_data(metadata)
 
+    async def push_data_to_lipsync_restore(self):
+        pbar = tqdm(desc="Pushing data to lipsync restore")
+        async for metadata in self.lipsync_model.result_stream():
+            self.lipsync_restore.push_data(metadata)
+            pbar.update(1)
+        self.lipsync_restore.add_end_task()
+        pbar.close()
+
+    @cached_property
+    def lipsync_restore(self):
+        return AlignRestore()
+
     async def wait_for_results(self):
-        async for data in self.lipsync_model.result_stream():
+        async for data in self.lipsync_restore.result_stream():
             yield data
+        # metadata: LipsyncMetadata
+        # async for metadata in self.lipsync_model.result_stream():
+        #     yield self.lipsync_restore.restore_img(
+        #         metadata.original_frame,
+        #         metadata.sync_face,
+        #         metadata.affine_matrix,
+        #     )
 
     def add_end_task(self):
         for worker in (self.audio_model, self.face_model):
             worker.add_end_task()
 
 
-async def auto_push_data(video_path, audio_path, model: LatentSyncInference, max_frames: int = 400):
+async def auto_push_data(video_path, audio_path, model: LatentSyncInference, max_frames: int = 1000):
     audio_clips = load_audio_clips(audio_path, model.context.samples_per_frame)
     for i, frame in enumerate(cycle_video_stream(video_path, max_frames)):
         model.push_frame(frame)
         model.push_audio(audio_clips[i % len(audio_clips)])
-        await asyncio.sleep(1 / 25)
+        await asyncio.sleep(1 / 20)
     model.add_end_task()
 
 
@@ -123,7 +145,7 @@ async def wait_for_results(model: LatentSyncInference):
     pbar = tqdm(desc="results")
     output_frames = []
     async for data in model.wait_for_results():
-        output_frames.append(data)
+        # output_frames.append(data)
         pbar.update(1)
     pbar.close()
     return output_frames
@@ -144,14 +166,13 @@ async def main():
         )
     )
     results = await wait_for_results(model)
-    save_frames_to_video(results, infer_package.video_out_path, audio_path=audio_path)
-    print(f"Saved to {infer_package.video_out_path}")
+    # save_frames_to_video(results, infer_package.video_out_path, audio_path=audio_path)
+    # print(f"Saved to {infer_package.video_out_path}")
 
     model.stop_workers()
 
 
 if __name__ == "__main__":
-    # Timer.enable()
+    Timer.enable()
     asyncio.run(main())
     Timer.summary()
-

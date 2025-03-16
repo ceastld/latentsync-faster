@@ -53,10 +53,12 @@ def run_inference(video_path: str, audio_path: str, output_path: str):
         batch_audio_features = audio_processor.process_audio_with_pre(last_audio_samples, current_audio_samples)
         last_audio_samples = current_audio_samples
 
-        output_frames = lipsync_model.process_batch(
+        output_metadata = lipsync_model.process_batch(
             metadata_list=batch_metadata,
             audio_features=batch_audio_features,
         )
+
+        output_frames = lipsync_model.restore_batch(output_metadata)
 
         processed_frames.extend(output_frames)
         frame_idx += len(frames_batch)
@@ -79,3 +81,4 @@ if __name__ == "__main__":
     Timer.enable()
     run_inference(video_path, audio_path, output_path)
     Timer.summary()
+    print(output_path)

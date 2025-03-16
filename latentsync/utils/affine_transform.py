@@ -105,12 +105,14 @@ class AlignRestore(object):
         """将NumPy图像转换为PyTorch张量"""
         if not self.use_gpu:
             return img
-            
-        if permute:
-            # 调整为PyTorch格式 [C, H, W]
-            tensor = torch.from_numpy(img).float().permute(2, 0, 1)
-        else:
+        
+        if isinstance(img, np.ndarray):
             tensor = torch.from_numpy(img).float()
+        else:
+            tensor = img
+
+        if permute:
+            tensor = tensor.permute(2, 0, 1)
             
         # 移动到GPU并可选地转换为FP16
         tensor = tensor.cuda()
@@ -397,18 +399,23 @@ class AlignRestore(object):
         upsample_img = result
         
         return upsample_img
-        
+    
+    # @Timer()
     def _restore_img_gpu(self, input_img, face, affine_matrix):
         """使用GPU实现的还原图像函数，支持FP16"""
         # 步骤1: 初始化和调整大小
         h, w, _ = input_img.shape
         h_up, w_up = int(h * self.upscale_factor), int(w * self.upscale_factor)
         
-        # 使用CPU调整图像大小
-        upsample_img = cv2.resize(input_img, (w_up, h_up), interpolation=cv2.INTER_LANCZOS4)
-        
-        # 转换到PyTorch并上传到GPU
-        upsample_img_t = self.to_tensor(upsample_img)
+        # Convert to tensor and resize using torch
+        # with Timer("restore_input_to_tensor"):
+        input_img_t = self.to_tensor(input_img)
+        upsample_img_t = F.interpolate(
+            input_img_t.unsqueeze(0),  # Add batch dimension
+            size=(h_up, w_up),
+            mode='bicubic',  # bicubic is closest to LANCZOS4
+            align_corners=True
+        ).squeeze(0)  # Remove batch dimension
         
         # 步骤2: 创建反向仿射变换
         inverse_affine = cv2.invertAffineTransform(affine_matrix)
@@ -421,8 +428,8 @@ class AlignRestore(object):
         
         # 步骤3: 应用反向仿射变换
         # 转换face到PyTorch并上传到GPU
-        # face_t = self.to_tensor(face)
-        face_t = face.permute(2, 0, 1).half()
+        face_t = self.to_tensor(face)
+        # face_t = face.permute(2, 0, 1).half()
         
         # 使用PyTorch执行仿射变换
         inv_restored_t = self.warp_affine_tensor(face_t, inverse_affine, (h_up, w_up))

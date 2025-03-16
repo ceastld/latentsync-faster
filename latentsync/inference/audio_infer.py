@@ -66,7 +66,6 @@ class AudioInference(MultiThreadInference):
         super().__init__(num_workers, worker_timeout, enable_timer)
         self.context = context
 
-    @Timer("audio_infer_model_init")
     def get_model(self):
         return AudioProcessor(self.context)
 

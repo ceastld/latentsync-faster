@@ -5,6 +5,8 @@ from latentsync.pipelines.metadata import LipsyncMetadata
 import torch
 from typing import List, override
 
+from latentsync.utils.affine_transform import AlignRestore
+
 
 class LipsyncInference(MultiThreadInference):
     def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60):
@@ -39,3 +41,17 @@ class LipsyncInference(MultiThreadInference):
             for i, result in enumerate(results):
                 self._set_result(self.result_start_idx + i, result)
             self.data_buffer = []
+
+class LipsyncRestore(MultiThreadInference):
+    def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60):
+        super().__init__(num_workers, worker_timeout)
+        self.context = context
+
+    def get_model(self):
+        return AlignRestore()
+    
+    def push_data(self, data: LipsyncMetadata):
+        self.add_one_task(data)
+
+    def infer_task(self, model: AlignRestore, data: LipsyncMetadata):
+        return model.restore_img(data.original_frame, data.sync_face, data.affine_matrix)

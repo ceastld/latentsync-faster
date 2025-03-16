@@ -65,7 +65,7 @@ class FaceProcessor:
 
         return face, box, affine_matrix
     
-    @Timer()
+    # @Timer()
     @torch.no_grad()
     def prepare_face(self, frame: np.ndarray):
         face, box, affine_matrix = self.affine_transform(frame)
@@ -74,7 +74,7 @@ class FaceProcessor:
         )
         return lipsync_metadata
 
-    # @Timer()
+    @Timer()
     @torch.no_grad()
     def prepare_face_batch(self, frames: List[np.ndarray]) -> Optional[List[LipsyncMetadata]]:
         """Process a batch of frames for facial preprocessing, using the same face alignment logic as the original method"""
@@ -85,20 +85,19 @@ class FaceProcessor:
         metadata_list: List[LipsyncMetadata] = []
 
         # 对第一帧进行预热,避免后续处理时的延迟
-        with Timer("prepare_face_batch"):
-            if len(metadata_list) == 0:
-                try:
-                    # 使用随机小图片进行预热
-                    warmup_img = np.random.randint(0, 255, (16, 16, 3), dtype=np.uint8)
-                    _ = self.prepare_face(warmup_img)
-                except Exception as e:
-                    print(f"预热失败: {e}")
-                    pass
+        # with Timer("prepare_face_batch"):
+        #     if len(metadata_list) == 0:
+        #         try:
+        #             # 使用随机小图片进行预热
+        #             warmup_img = np.random.randint(0, 255, (16, 16, 3), dtype=np.uint8)
+        #             _ = self.prepare_face(warmup_img)
+        #         except Exception as e:
+        #             print(f"预热失败: {e}")
+        #             pass
         for frame in frames:
             try:
-                with Timer("prepare_face"):
-                    metadata = self.prepare_face(frame)
-                    metadata_list.append(metadata)
+                metadata = self.prepare_face(frame)
+                metadata_list.append(metadata)
             except Exception as e:
                 print(f"Face preprocessing failed: {e}")
                 # If processing fails and there are other successfully processed frames, use the result of the previous frame

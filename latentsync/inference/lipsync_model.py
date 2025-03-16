@@ -14,6 +14,8 @@ class LipsyncModel:
     def __init__(self, context: LipsyncContext):
         self.context: LipsyncContext = context
         self.pipeline = create_diffusion_pipeline(context)
+        # Initialize restorer during initialization to avoid first-call delay
+        self.restorer = AlignRestore()
 
     @property
     def device(self):
@@ -28,7 +30,7 @@ class LipsyncModel:
         synced_faces_batch, _ = self.pipeline._run_diffusion_batch(faces, audio_features, self.context)
         return synced_faces_batch
 
-    # @Timer()
+    @Timer()
     @torch.no_grad()
     def process_batch(
         self,
@@ -43,15 +45,21 @@ class LipsyncModel:
         for i, metadata in enumerate(metadata_list):
             metadata.set_sync_face(synced_faces_batch[i])
 
-        output_frames = [
+        return metadata_list
+
+        # output_frames = [
+        #     self.restorer.restore_img(metadata.original_frame, metadata.sync_face, metadata.affine_matrix)
+        #     for metadata in metadata_list
+        # ]
+        # return output_frames
+
+    @Timer()
+    @torch.no_grad()
+    def restore_batch(self, metadata_list: List[LipsyncMetadata]):
+        return [
             self.restorer.restore_img(metadata.original_frame, metadata.sync_face, metadata.affine_matrix)
             for metadata in metadata_list
         ]
-        return output_frames
-
-    @cached_property
-    def restorer(self):
-        return AlignRestore()
 
     @property
     def face_processor(self):

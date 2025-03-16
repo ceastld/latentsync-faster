@@ -14,9 +14,12 @@ import queue
 
 from latentsync.utils.timer import Timer
 
+
 class WorkerStoppedException(Exception):
     """Exception raised when trying to get results from stopped workers"""
+
     pass
+
 
 class InferenceWorker:
     def __init__(self, num_workers=1, worker_timeout=60):
@@ -29,7 +32,7 @@ class InferenceWorker:
         self.num_workers = num_workers
         self.task_start_counter = Value("i", 0)
         self.task_wait_counter = Value("i", 0)
-        self._stopped = Value('b', False)  # Boolean flag to indicate if workers are stopped
+        self._stopped = Value("b", False)  # Boolean flag to indicate if workers are stopped
 
     def is_stopped(self):
         """Check if the workers have been stopped"""
@@ -82,7 +85,7 @@ class InferenceWorker:
             wait_idx = self.task_wait_counter.value
             self.task_wait_counter.value += 1
         return await self._wait_for_id(wait_idx, remove)
-    
+
     async def result_stream(self):
         while self.is_alive() or len(self.results) > 0:
             try:
@@ -91,7 +94,7 @@ class InferenceWorker:
             except WorkerStoppedException:
                 print("stream stopped")
                 break
-            
+
     async def wait_for_results(self, count: int, pbar: tqdm = None, remove=True):
         """
         Wait for a specific number of results to be available.
@@ -168,7 +171,9 @@ class MultiThreadInference(InferenceWorker):
     """
     Multi-threaded inference worker class for PyTorch CUDA inference.
     This class implements thread-safe model inference using a shared model instance.
+    Each worker thread has its own CUDA stream to avoid contention.
     """
+
     warnings.filterwarnings("ignore", category=FutureWarning)
     logger = logging.getLogger("MultiThreadInference")
 
@@ -191,6 +196,9 @@ class MultiThreadInference(InferenceWorker):
         self.worker_loaded_event = threading.Event()
         self.enable_timer = enable_timer
         self.model_lock = threading.Lock()
+        # Store CUDA streams for each worker thread
+        self.streams = {}
+        self.streams_lock = threading.Lock()
 
     def get_model(self):
         """
@@ -207,6 +215,27 @@ class MultiThreadInference(InferenceWorker):
             with self.counter_lock:
                 self.task_complete_counter += 1
 
+    def _get_worker_stream(self) -> torch.cuda.Stream:
+        """
+        Get or create a CUDA stream for the current worker thread
+        """
+        thread_id = threading.get_ident()
+        with self.streams_lock:
+            if thread_id not in self.streams:
+                self.streams[thread_id] = torch.cuda.Stream()
+            return self.streams[thread_id]
+
+    def _cleanup_worker_stream(self):
+        """
+        Clean up the CUDA stream for the current worker thread
+        """
+        thread_id = threading.get_ident()
+        with self.streams_lock:
+            if thread_id in self.streams:
+                # Wait for all operations in the stream to complete
+                self.streams[thread_id].synchronize()
+                del self.streams[thread_id]
+
     # @Timer()
     def wait_worker_loaded(self, timeout=None):
         if self.worker_loaded_count > 0:
@@ -218,12 +247,16 @@ class MultiThreadInference(InferenceWorker):
 
     def process_task(self, model, idx, input_data):
         """
-        Process a single inference task with thread-safe model access
+        Process a single inference task with thread-safe model access and CUDA stream
         """
         result = None
         if input_data is not None:
-            with self.model_lock:
-                result = self.infer_task(model, input_data)
+            stream = self._get_worker_stream()
+            with torch.cuda.stream(stream):
+                with self.model_lock:
+                    result = self.infer_task(model, input_data)
+                # Synchronize the stream to ensure all operations are complete
+                stream.synchronize()
         self._set_result(idx, result)
 
     def preprocess(self):
@@ -236,35 +269,34 @@ class MultiThreadInference(InferenceWorker):
         """
         Worker thread function to process tasks from the queue
         """
-        if self.enable_timer:
-            Timer.enable()
         model = self.get_model()
 
         with self.counter_lock:
             self.worker_loaded_count += 1
         self.worker_loaded_event.set()
 
-        while True:
-            try:
-                idx, input_data = self.task_queue.get(timeout=self.worker_timeout)
-                if idx is None:
-                    self.logger.info("Worker received end task, worker exit")
-                    break
+        try:
+            while True:
                 try:
-                    self.preprocess()
-                    self.process_task(model, idx, input_data)
-                except Exception as e:
-                    print(f"Error in worker: {e}, worker exit")
-                    traceback.print_exc()
-                    break
-                finally:
-                    self.task_queue.task_done()
-            except queue.Empty:
-                continue
-
-        with self.counter_lock:
-            self.worker_loaded_count -= 1
-        Timer.summary()
+                    idx, input_data = self.task_queue.get(timeout=self.worker_timeout)
+                    if idx is None:
+                        self.logger.info("Worker received end task, worker exit")
+                        break
+                    try:
+                        self.preprocess()
+                        self.process_task(model, idx, input_data)
+                    except Exception as e:
+                        print(f"Error in worker: {e}, worker exit")
+                        traceback.print_exc()
+                        break
+                    finally:
+                        self.task_queue.task_done()
+                except queue.Empty:
+                    continue
+        finally:
+            self._cleanup_worker_stream()
+            with self.counter_lock:
+                self.worker_loaded_count -= 1
 
     def is_alive(self):
         return any(t.is_alive() for t in self.worker_list)
@@ -273,7 +305,6 @@ class MultiThreadInference(InferenceWorker):
         """
         Start worker threads and initialize the shared model
         """
-        
         # Start threads
         for _ in range(self.num_workers):
             t = threading.Thread(target=self.worker, daemon=True)
@@ -282,19 +313,19 @@ class MultiThreadInference(InferenceWorker):
 
     def stop_workers(self):
         """
-        Stop all worker threads gracefully
+        Stop all worker threads gracefully and clean up CUDA streams
         """
         # Send stop signals to workers
         self.add_end_task()
-        
+
         # Wait for all threads to finish
         for t in self.worker_list:
             t.join()
-        
+
         self.worker_list.clear()
         with self.counter_lock:
             self.worker_loaded_count = 0
-        
+
         # Get final results
         with self.results_lock:
             return [self.results[key] for key in sorted(self.results.keys())]
@@ -315,6 +346,7 @@ class MultiThreadInference(InferenceWorker):
 class MultiProcessInference(InferenceWorker):
     warnings.filterwarnings("ignore", category=FutureWarning)
     logger = logging.getLogger("MultiProcessInference")
+
     def __init__(self, num_workers=1, worker_timeout=60, enable_timer=False):
         """
         Initialize the multi-process inference class.
@@ -338,7 +370,7 @@ class MultiProcessInference(InferenceWorker):
         Load the model for inference. This is a placeholder method.
         """
         raise NotImplementedError("Subclasses must implement this method.")
-    
+
     # @Timer()
     def wait_worker_loaded(self, timeout=None):
         if self.worker_loaded_count.value > 0:
@@ -347,19 +379,19 @@ class MultiProcessInference(InferenceWorker):
         if loaded:
             self.logger.info("Worker Loaded")
         return loaded
-    
+
     def process_task(self, model, idx, input_data):
         result = None
         if input_data is not None:
             result = self.infer_task(model, input_data)
         self._set_result(idx, result)
-    
+
     def preprocess(self):
         """
         Preprocess function to be run before processing tasks
         """
         pass
-    
+
     def worker(self):
         """
         Worker process function to process tasks from the queue.

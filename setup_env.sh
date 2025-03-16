@@ -34,4 +34,4 @@ ln -s $(pwd)/checkpoints/auxiliary/vgg16-397923af.pth ~/.cache/torch/hub/checkpo
 echo "设置人脸检测模型..."
 python scripts/setup_face_detection.py
 
-pip install torch-tensorrt
+# pip install torch-tensorrt

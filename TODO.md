@@ -9,6 +9,9 @@ stream inference
 
 * 排查每一步数据是否在GPU上
 
+* 串行 14.7 fps
+* 并行 17.2 fps
+
 # speed test
 * ori var and unet
 ```
