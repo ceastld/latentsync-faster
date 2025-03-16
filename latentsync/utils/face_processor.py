@@ -61,7 +61,8 @@ class FaceProcessor:
         face = rearrange(torch.from_numpy(face), "h w c -> c h w")
 
         return face, box, affine_matrix
-
+    
+    @Timer()
     @torch.no_grad()
     def prepare_face(self, frame: np.ndarray):
         face, box, affine_matrix = self.affine_transform(frame)

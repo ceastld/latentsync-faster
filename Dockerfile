@@ -56,4 +56,4 @@ RUN ln -sf $(pwd)/checkpoints/auxiliary/vgg16-397923af.pth ~/.cache/torch/hub/ch
 RUN chmod +x inference.sh
 
 # Set default command
-ENTRYPOINT ["./inference.sh"] 
+# ENTRYPOINT ["./inference.sh"] 
