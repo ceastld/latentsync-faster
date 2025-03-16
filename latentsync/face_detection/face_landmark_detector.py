@@ -124,61 +124,43 @@ class FaceLandmarkDetector:
             
     def _warmup(self):
         """预热模型，确保首次推理不会有性能损失"""
+        # 创建一个简单的测试图像
+        dummy_image = np.zeros((240, 320, 3), dtype=np.uint8)
+        
+        # 预处理图像
+        img_mean = np.array([127, 127, 127])
+        image = (dummy_image - img_mean) / 128
+        image = np.transpose(image, [2, 0, 1])
+        image = np.expand_dims(image, axis=0)
+        image = image.astype(np.float32)
+        
+        # 预热人脸检测器
         try:
-            # 创建一个简单的测试图像
-            dummy_image = np.zeros((240, 320, 3), dtype=np.uint8)
-            
-            # 预处理图像
-            img_mean = np.array([127, 127, 127])
-            image = (dummy_image - img_mean) / 128
-            image = np.transpose(image, [2, 0, 1])
-            image = np.expand_dims(image, axis=0)
-            image = image.astype(np.float32)
-            
-            # 预热人脸检测器
             for _ in range(3):  # 连续多次调用以确保预热充分
                 self.face_detector.run(None, {self.face_detector_input_name: image})
-                
-            # 创建一个测试图像用于关键点检测
-            dummy_landmark_image = np.zeros((192, 192, 3), dtype=np.uint8)
-            landmark_image = np.transpose(dummy_landmark_image, [2, 0, 1])
-            landmark_image = np.expand_dims(landmark_image, axis=0).astype(np.float32)
-            
-            # 预热关键点检测器
-            for _ in range(2):  # 减少调用次数，避免过度预热
-                self.landmark_detector.run(None, {self.landmark_detector_input_name: landmark_image})
-                
-            print("人脸检测器预热完成")
-            return True
         except Exception as e:
-            print(f"人脸检测器预热失败，但将继续执行: {e}")
-            return False
+            print(f"人脸检测器预热时出错: {e}")
+            
+        # 创建一个测试图像用于关键点检测
+        dummy_landmark_image = np.zeros((192, 192, 3), dtype=np.uint8)
+        landmark_image = np.transpose(dummy_landmark_image, [2, 0, 1])
+        landmark_image = np.expand_dims(landmark_image, axis=0).astype(np.float32)
+        
+        # 预热关键点检测器
+        try:
+            for _ in range(3):  # 连续多次调用以确保预热充分
+                self.landmark_detector.run(None, {self.landmark_detector_input_name: landmark_image})
+        except Exception as e:
+            print(f"关键点检测器预热时出错: {e}")
     
     def maintain_session(self):
         """主动维持会话活跃，在批处理循环中调用"""
-        try:
-            if "cuda" in str(self.device).lower():
-                # 强制CUDA同步，确保之前的操作完成
-                torch.cuda.synchronize()
-            
-            # 执行一次微小的推理以保持会话活跃
-            # 创建一个简单的测试图像
-            dummy_image = np.zeros((240, 320, 3), dtype=np.uint8)
-            
-            # 预处理图像
-            img_mean = np.array([127, 127, 127])
-            image = (dummy_image - img_mean) / 128
-            image = np.transpose(image, [2, 0, 1])
-            image = np.expand_dims(image, axis=0)
-            image = image.astype(np.float32)
-            
-            # 运行一次前向传播保持会话活跃
-            # 为了提高稳定性，仅运行人脸检测器
-            self.face_detector.run(None, {self.face_detector_input_name: image})
-            return True
-        except Exception as e:
-            print(f"维持会话时出错，但将继续执行: {e}")
-            return False
+        if "cuda" in str(self.device).lower():
+            # 强制CUDA同步，确保之前的操作完成
+            torch.cuda.synchronize()
+        
+        # 执行一次微小的推理以保持会话活跃
+        self._warmup()
     
     def detect_face(self, image: np.ndarray) -> Optional[np.ndarray]:
         """

@@ -49,22 +49,19 @@ def create_pipeline(context: LipsyncContext) -> LipsyncPipeline:
         lipsync_context=context,
     ).to(context.device)
     
-    # 组装模型字典用于预热 - 移除UNet预热以避免通道不匹配错误
+    # 组装模型字典用于预热
     models_dict = {
         'vae': vae,
+        'unet': unet,
         'audio_encoder': audio_encoder,
-        # 'unet': unet,  # 暂时移除UNet预热，避免输入格式不匹配错误
     }
     
     # 如果pipeline有face_detector属性，也添加到预热列表
     if hasattr(pipeline, 'face_processor') and hasattr(pipeline.face_processor, 'face_detector'):
         models_dict['face_detector'] = pipeline.face_processor.face_detector
     
-    # 预热各组件 - UNet在实际使用时会自动获得正确的输入
-    try:
-        context.warmup_models(models_dict)
-    except Exception as e:
-        print(f"预热过程中发生错误，但将继续执行: {e}")
+    # 预热所有模型组件
+    context.warmup_models(models_dict)
     
     return pipeline
 

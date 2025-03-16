@@ -89,75 +89,47 @@ class LipsyncContext:
         
         # 预热VAE
         if 'vae' in models_dict:
-            try:
-                dummy_latents = torch.randn(1, 4, self.height // 8, self.width // 8, device=self.device, dtype=self.weight_dtype)
-                with torch.no_grad():
-                    _ = models_dict['vae'].decode(dummy_latents)
-                    torch.cuda.synchronize()
-                print("VAE预热成功")
-            except Exception as e:
-                print(f"VAE预热失败: {e}")
+            dummy_latents = torch.randn(1, 4, self.height // 8, self.width // 8, device=self.device, dtype=self.weight_dtype)
+            with torch.no_grad():
+                _ = models_dict['vae'].decode(dummy_latents)
+                torch.cuda.synchronize()
         
-        # 预热UNet (调整输入格式并添加更健壮的错误处理)
+        # 预热UNet
         if 'unet' in models_dict:
-            try:
-                # 正确设置UNet预热输入
-                # 注意：UNet的输入通道应该匹配模型期望值，这里从错误信息看应为13通道
-                batch_size = 1
-                num_frames = 4
-                in_channels = 13  # 从错误信息中确定的正确通道数
-                
-                # 确保输入尺寸正确
-                dummy_latents = torch.randn(
-                    batch_size, in_channels, num_frames, self.height // 8, self.width // 8, 
-                    device=self.device, dtype=self.weight_dtype
+            batch_size = 1
+            dummy_latents = torch.randn(
+                batch_size, 4, 4, self.height // 8, self.width // 8, 
+                device=self.device, dtype=self.weight_dtype
+            )
+            dummy_timesteps = torch.ones(batch_size, device=self.device) * 999
+            dummy_encoder_hidden_states = torch.randn(
+                batch_size, 224, 1280, 
+                device=self.device, dtype=self.weight_dtype
+            )
+            
+            with torch.no_grad():
+                _ = models_dict['unet'](
+                    dummy_latents, 
+                    dummy_timesteps, 
+                    encoder_hidden_states=dummy_encoder_hidden_states
                 )
-                dummy_timesteps = torch.ones(batch_size, device=self.device) * 999
-                
-                # 确保隐藏状态尺寸正确
-                dummy_encoder_hidden_states = torch.randn(
-                    batch_size, num_frames, 1280,  
-                    device=self.device, dtype=self.weight_dtype
-                )
-                
-                # 尝试进行一次前向传播
-                with torch.no_grad():
-                    _ = models_dict['unet'](
-                        dummy_latents, 
-                        dummy_timesteps, 
-                        encoder_hidden_states=dummy_encoder_hidden_states
-                    )
-                    torch.cuda.synchronize()
-                print("UNet预热成功")
-            except Exception as e:
-                print(f"UNet预热失败，跳过: {e}")
-                print("这个错误不会影响实际执行，将在正式运行时自动使用正确参数")
+                torch.cuda.synchronize()
         
         # 预热人脸检测器
         if 'face_detector' in models_dict:
-            try:
-                # 生成假图像并调用一次人脸检测器的maintain_session方法
-                models_dict['face_detector'].maintain_session()
-                print("人脸检测器预热成功")
-            except Exception as e:
-                print(f"人脸检测器预热失败: {e}")
-        
+            # 生成假图像并调用一次人脸检测器的maintain_session方法
+            models_dict['face_detector'].maintain_session()
+            
         # 预热音频编码器
         if 'audio_encoder' in models_dict:
-            try:
-                dummy_audio = np.random.rand(16000).astype(np.float32)  # 1秒的16kHz音频
-                models_dict['audio_encoder'].get_audio_features(dummy_audio)
-                print("音频编码器预热成功")
-            except Exception as e:
-                print(f"音频编码器预热失败: {e}")
+            dummy_audio = np.random.rand(16000).astype(np.float32)  # 1秒的16kHz音频
+            models_dict['audio_encoder'].get_audio_features(dummy_audio)
             
         print("模型预热完成")
         self.prewarmed = True
         
         # 强制等待所有预热操作完成
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()  # 清理预热过程中可能产生的临时缓存
+        torch.cuda.synchronize()
         time.sleep(0.5)  # 额外等待，确保所有GPU操作完成
 
     @classmethod
