@@ -83,7 +83,7 @@ class AudioInference(MultiThreadInference):
         if len(audio_buffer) == 0:
             self.result_start_idx = idx
         audio_buffer.append(audio_clip)
-        if len(audio_buffer) >= self.context.num_frames:
+        if len(audio_buffer) >= self.context.audio_batch_size:
             audio_samples = np.concatenate(audio_buffer)
             result = model.process_audio_with_pre(self.last_audio_samples, audio_samples)
             for i in range(len(audio_buffer)):

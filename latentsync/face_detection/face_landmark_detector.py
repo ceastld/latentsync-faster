@@ -28,9 +28,9 @@ class FaceLandmarkDetector:
         
         # 设置默认模型路径
         if face_detector_path is None:
-            face_detector_path = os.path.join(os.path.dirname(__file__), "models", "face_detector.onnx")
+            face_detector_path = os.path.join(os.path.dirname(__file__), "models", "face_detector_fixed.onnx")
         if landmark_detector_path is None:
-            landmark_detector_path = os.path.join(os.path.dirname(__file__), "models", "landmark_detector.onnx")
+            landmark_detector_path = os.path.join(os.path.dirname(__file__), "models", "landmark_detector_fixed.onnx")
         
         self.face_detector_path = face_detector_path
         self.landmark_detector_path = landmark_detector_path

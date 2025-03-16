@@ -13,7 +13,7 @@ from latentsync.inference.multi_infer import MultiThreadInference
 from latentsync.inference.utils import load_audio_clips
 from latentsync.pipelines.metadata import LipsyncMetadata
 from latentsync.utils.timer import Timer
-from latentsync.utils.video import cycle_video_stream, VideoReader
+from latentsync.utils.video import cycle_video_stream, VideoReader, save_frames_to_video
 
 
 class LatentSyncInference:
@@ -121,9 +121,12 @@ async def auto_push_data(video_path, audio_path, model: LatentSyncInference, max
 
 async def wait_for_results(model: LatentSyncInference):
     pbar = tqdm(desc="results")
+    output_frames = []
     async for data in model.wait_for_results():
+        output_frames.append(data)
         pbar.update(1)
     pbar.close()
+    return output_frames
 
 
 async def main():
@@ -131,14 +134,16 @@ async def main():
     model = LatentSyncInference(context)
     model.wait_loaded()
     model.start_processing()
+    audio_path = GLOBAL_CONFIG.inference.default_audio_path
     asyncio.create_task(
         auto_push_data(
             GLOBAL_CONFIG.inference.default_video_path,
-            GLOBAL_CONFIG.inference.default_audio_path,
+            audio_path,
             model,
         )
     )
-    await wait_for_results(model)
+    results = await wait_for_results(model)
+    save_frames_to_video(results, "output/output.mp4", audio_path=audio_path)
 
     model.stop_workers()
 
@@ -147,3 +152,4 @@ if __name__ == "__main__":
     # Timer.enable()
     asyncio.run(main())
     Timer.summary()
+

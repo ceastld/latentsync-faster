@@ -15,6 +15,7 @@ class LipsyncContext:
     audio_sample_rate: int = GLOBAL_CONFIG.lipsync.audio_sample_rate
     video_fps: int = GLOBAL_CONFIG.lipsync.video_fps
     num_frames: int = GLOBAL_CONFIG.lipsync.num_frames
+    audio_batch_size: int = GLOBAL_CONFIG.lipsync.audio_batch_size
     height: int = GLOBAL_CONFIG.lipsync.height
     width: int = GLOBAL_CONFIG.lipsync.width
     resolution: int = GLOBAL_CONFIG.lipsync.width
