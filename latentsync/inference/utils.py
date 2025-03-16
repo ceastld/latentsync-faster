@@ -9,61 +9,23 @@ from latentsync.whisper.whisper.audio import load_audio
 
 def create_diffusion_pipeline(context: LipsyncContext) -> LipsyncDiffusionPipeline:
     """Create lipsync diffusion pipeline with all components"""
-    # 创建模型组件
-    vae = context.create_vae()
-    unet = context.create_unet()
-    scheduler = context.create_scheduler()
-    
-    # 组装模型字典用于预热
-    models_dict = {
-        'vae': vae,
-        'unet': unet,
-    }
-    
-    # 预热模型组件
-    context.warmup_models(models_dict)
-    
-    # 创建并返回管道
     return LipsyncDiffusionPipeline(
-        vae=vae,
-        unet=unet,
-        scheduler=scheduler,
+        vae=context.create_vae(),
+        unet=context.create_unet(),
+        scheduler=context.create_scheduler(),
         lipsync_context=context,
     ).to(context.device)
 
 
 def create_pipeline(context: LipsyncContext) -> LipsyncPipeline:
     """Create lipsync pipeline with all components"""
-    # 创建各个模型组件
-    vae = context.create_vae()
-    audio_encoder = context.create_audio_encoder()
-    unet = context.create_unet()
-    scheduler = context.create_scheduler()
-    
-    # 创建pipeline对象
-    pipeline = LipsyncPipeline(
-        vae=vae,
-        audio_encoder=audio_encoder,
-        unet=unet,
-        scheduler=scheduler,
+    return LipsyncPipeline(
+        vae=context.create_vae(),
+        audio_encoder=context.create_audio_encoder(),
+        unet=context.create_unet(),
+        scheduler=context.create_scheduler(),
         lipsync_context=context,
     ).to(context.device)
-    
-    # 组装模型字典用于预热
-    models_dict = {
-        'vae': vae,
-        'unet': unet,
-        'audio_encoder': audio_encoder,
-    }
-    
-    # 如果pipeline有face_detector属性，也添加到预热列表
-    if hasattr(pipeline, 'face_processor') and hasattr(pipeline.face_processor, 'face_detector'):
-        models_dict['face_detector'] = pipeline.face_processor.face_detector
-    
-    # 预热所有模型组件
-    context.warmup_models(models_dict)
-    
-    return pipeline
 
 
 def set_seed(seed: int):

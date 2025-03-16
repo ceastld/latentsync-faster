@@ -8,8 +8,6 @@ from diffusers import AutoencoderTiny, DPMSolverMultistepScheduler
 from diffusers.utils.import_utils import is_xformers_available
 from latentsync.models.unet import UNet3DConditionModel
 from latentsync.whisper.audio2feature import Audio2Feature
-import numpy as np
-import time
 
 @dataclass
 class LipsyncContext:
@@ -42,7 +40,6 @@ class LipsyncContext:
     extra_step_kwargs: dict = None
 
     use_compile: bool = False
-    prewarmed: bool = False
 
     def __post_init__(self):
         # Set do_classifier_free_guidance based on guidance_scale
@@ -79,58 +76,6 @@ class LipsyncContext:
         return DPMSolverMultistepScheduler.from_pretrained(
             GLOBAL_CONFIG.config_dir, algorithm_type="dpmsolver++", solver_order=1
         )
-
-    def warmup_models(self, models_dict):
-        """预热所有模型，确保首次推理时不会出现延迟"""
-        if self.prewarmed:
-            return
-            
-        print("正在预热模型组件...")
-        
-        # 预热VAE
-        if 'vae' in models_dict:
-            dummy_latents = torch.randn(1, 4, self.height // 8, self.width // 8, device=self.device, dtype=self.weight_dtype)
-            with torch.no_grad():
-                _ = models_dict['vae'].decode(dummy_latents)
-                torch.cuda.synchronize()
-        
-        # 预热UNet
-        if 'unet' in models_dict:
-            batch_size = 1
-            dummy_latents = torch.randn(
-                batch_size, 4, 4, self.height // 8, self.width // 8, 
-                device=self.device, dtype=self.weight_dtype
-            )
-            dummy_timesteps = torch.ones(batch_size, device=self.device) * 999
-            dummy_encoder_hidden_states = torch.randn(
-                batch_size, 224, 1280, 
-                device=self.device, dtype=self.weight_dtype
-            )
-            
-            with torch.no_grad():
-                _ = models_dict['unet'](
-                    dummy_latents, 
-                    dummy_timesteps, 
-                    encoder_hidden_states=dummy_encoder_hidden_states
-                )
-                torch.cuda.synchronize()
-        
-        # 预热人脸检测器
-        if 'face_detector' in models_dict:
-            # 生成假图像并调用一次人脸检测器的maintain_session方法
-            models_dict['face_detector'].maintain_session()
-            
-        # 预热音频编码器
-        if 'audio_encoder' in models_dict:
-            dummy_audio = np.random.rand(16000).astype(np.float32)  # 1秒的16kHz音频
-            models_dict['audio_encoder'].get_audio_features(dummy_audio)
-            
-        print("模型预热完成")
-        self.prewarmed = True
-        
-        # 强制等待所有预热操作完成
-        torch.cuda.synchronize()
-        time.sleep(0.5)  # 额外等待，确保所有GPU操作完成
 
     @classmethod
     def from_dict(cls, config_dict: dict) -> "LipsyncContext":
