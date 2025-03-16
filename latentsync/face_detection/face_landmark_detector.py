@@ -9,13 +9,18 @@ from latentsync.utils.timer import Timer
 
 from .utils.box_utils import hard_nms
 
+# 全局ONNX会话缓存和锁
+_GLOBAL_SESSION_CACHE = {}
+_GLOBAL_SESSION_INITIALIZED = False
+
 class FaceLandmarkDetector:
     """统一的人脸关键点检测接口"""
     
     def __init__(self, 
                  device: str = "cuda", 
                  face_detector_path: Optional[str] = None,
-                 landmark_detector_path: Optional[str] = None):
+                 landmark_detector_path: Optional[str] = None,
+                 use_global_session: bool = True):
         """
         初始化人脸关键点检测器
         
@@ -23,8 +28,10 @@ class FaceLandmarkDetector:
             device: 设备，'cpu'或'cuda'
             face_detector_path: 人脸检测器模型路径，如果为None则使用默认路径
             landmark_detector_path: 关键点检测器模型路径，如果为None则使用默认路径
+            use_global_session: 是否使用全局会话缓存，默认为True
         """
         self.device = device
+        self.use_global_session = use_global_session
         
         # 设置默认模型路径
         if face_detector_path is None:
@@ -37,6 +44,9 @@ class FaceLandmarkDetector:
         
         # 初始化ONNX检测器
         self._init_onnx_detector()
+        
+        # 预热模型
+        self._warmup()
     
     def _init_onnx_detector(self):
         """初始化ONNX检测器，支持GPU加速"""
@@ -63,21 +73,112 @@ class FaceLandmarkDetector:
         # 创建会话选项
         session_options = ort.SessionOptions()
         session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        # 禁用内存模式，提高会话稳定性
+        session_options.enable_mem_pattern = False
+        # 设置会话线程数
+        session_options.inter_op_num_threads = 1
+        session_options.intra_op_num_threads = 1
         
-        # 初始化ONNX运行时会话
-        self.face_detector = ort.InferenceSession(
-            self.face_detector_path, 
-            sess_options=session_options,
-            providers=providers
-        )
-        self.face_detector_input_name = self.face_detector.get_inputs()[0].name
+        global _GLOBAL_SESSION_CACHE, _GLOBAL_SESSION_INITIALIZED
         
-        self.landmark_detector = ort.InferenceSession(
-            self.landmark_detector_path,
-            sess_options=session_options,
-            providers=providers
-        )
-        self.landmark_detector_input_name = self.landmark_detector.get_inputs()[0].name
+        # 使用全局会话缓存
+        if self.use_global_session:
+            if not _GLOBAL_SESSION_INITIALIZED:
+                # 初始化全局会话
+                _GLOBAL_SESSION_CACHE['face_detector'] = ort.InferenceSession(
+                    self.face_detector_path, 
+                    sess_options=session_options,
+                    providers=providers
+                )
+                _GLOBAL_SESSION_CACHE['face_detector_input_name'] = _GLOBAL_SESSION_CACHE['face_detector'].get_inputs()[0].name
+                
+                _GLOBAL_SESSION_CACHE['landmark_detector'] = ort.InferenceSession(
+                    self.landmark_detector_path,
+                    sess_options=session_options,
+                    providers=providers
+                )
+                _GLOBAL_SESSION_CACHE['landmark_detector_input_name'] = _GLOBAL_SESSION_CACHE['landmark_detector'].get_inputs()[0].name
+                
+                _GLOBAL_SESSION_INITIALIZED = True
+                
+            # 使用全局会话
+            self.face_detector = _GLOBAL_SESSION_CACHE['face_detector']
+            self.face_detector_input_name = _GLOBAL_SESSION_CACHE['face_detector_input_name']
+            self.landmark_detector = _GLOBAL_SESSION_CACHE['landmark_detector']
+            self.landmark_detector_input_name = _GLOBAL_SESSION_CACHE['landmark_detector_input_name']
+        else:
+            # 每个实例创建自己的会话
+            self.face_detector = ort.InferenceSession(
+                self.face_detector_path, 
+                sess_options=session_options,
+                providers=providers
+            )
+            self.face_detector_input_name = self.face_detector.get_inputs()[0].name
+            
+            self.landmark_detector = ort.InferenceSession(
+                self.landmark_detector_path,
+                sess_options=session_options,
+                providers=providers
+            )
+            self.landmark_detector_input_name = self.landmark_detector.get_inputs()[0].name
+            
+    def _warmup(self):
+        """预热模型，确保首次推理不会有性能损失"""
+        try:
+            # 创建一个简单的测试图像
+            dummy_image = np.zeros((240, 320, 3), dtype=np.uint8)
+            
+            # 预处理图像
+            img_mean = np.array([127, 127, 127])
+            image = (dummy_image - img_mean) / 128
+            image = np.transpose(image, [2, 0, 1])
+            image = np.expand_dims(image, axis=0)
+            image = image.astype(np.float32)
+            
+            # 预热人脸检测器
+            for _ in range(3):  # 连续多次调用以确保预热充分
+                self.face_detector.run(None, {self.face_detector_input_name: image})
+                
+            # 创建一个测试图像用于关键点检测
+            dummy_landmark_image = np.zeros((192, 192, 3), dtype=np.uint8)
+            landmark_image = np.transpose(dummy_landmark_image, [2, 0, 1])
+            landmark_image = np.expand_dims(landmark_image, axis=0).astype(np.float32)
+            
+            # 预热关键点检测器
+            for _ in range(2):  # 减少调用次数，避免过度预热
+                self.landmark_detector.run(None, {self.landmark_detector_input_name: landmark_image})
+                
+            print("人脸检测器预热完成")
+            return True
+        except Exception as e:
+            print(f"人脸检测器预热失败，但将继续执行: {e}")
+            return False
+    
+    def maintain_session(self):
+        """主动维持会话活跃，在批处理循环中调用"""
+        try:
+            if "cuda" in str(self.device).lower():
+                # 强制CUDA同步，确保之前的操作完成
+                torch.cuda.synchronize()
+            
+            # 执行一次微小的推理以保持会话活跃
+            # 创建一个简单的测试图像
+            dummy_image = np.zeros((240, 320, 3), dtype=np.uint8)
+            
+            # 预处理图像
+            img_mean = np.array([127, 127, 127])
+            image = (dummy_image - img_mean) / 128
+            image = np.transpose(image, [2, 0, 1])
+            image = np.expand_dims(image, axis=0)
+            image = image.astype(np.float32)
+            
+            # 运行一次前向传播保持会话活跃
+            # 为了提高稳定性，仅运行人脸检测器
+            self.face_detector.run(None, {self.face_detector_input_name: image})
+            return True
+        except Exception as e:
+            print(f"维持会话时出错，但将继续执行: {e}")
+            return False
     
     def detect_face(self, image: np.ndarray) -> Optional[np.ndarray]:
         """
@@ -105,7 +206,8 @@ class FaceLandmarkDetector:
         image = image.astype(np.float32)
         
         # 运行检测器
-        confidences, boxes = self.face_detector.run(None, {self.face_detector_input_name: image})
+        with Timer("face_detector"):
+            confidences, boxes = self.face_detector.run(None, {self.face_detector_input_name: image})
         
         # 获取边界框
         boxes, labels, probs = self._predict_boxes(orig_size[1], orig_size[0], confidences, boxes, 0.7)

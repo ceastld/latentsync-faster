@@ -47,7 +47,7 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         self.audio_encoder = audio_encoder
         self.register_modules(audio_encoder=audio_encoder)
 
-    @Timer(name="prepare_audio_batch")
+    # @Timer(name="prepare_audio_batch")
     def _prepare_audio_batch(self, whisper_feature: Optional[torch.Tensor], batch_idx: int, 
                            num_frames_in_batch: int, context: LipsyncContext) -> Optional[List[torch.Tensor]]:
         """Prepare audio features for the current batch"""
@@ -85,27 +85,31 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
                       batch_idx: int, context: LipsyncContext) -> Optional[List[LipsyncMetadata]]:
         """Process a single batch of frames"""
         # 1. Facial preprocessing
-        metadata_list: Optional[List[LipsyncMetadata]] = self.face_processor.prepare_face_batch(frames)
-        
-        if metadata_list is None:
-            print(f"Batch {batch_idx+1} No valid face detected, skipping")
-            return None
+        with Timer("facial_preprocessing"):
+            metadata_list: Optional[List[LipsyncMetadata]] = self.face_processor.prepare_face_batch(frames)
             
-        faces = torch.stack([metadata.face for metadata in metadata_list])
+            if metadata_list is None:
+                print(f"Batch {batch_idx+1} No valid face detected, skipping")
+                return None
+                
+            faces = torch.stack([metadata.face for metadata in metadata_list])
         
         # 2. Prepare audio features for the current batch
-        current_audio_features = self._prepare_audio_batch(
-            whisper_feature, batch_idx, len(faces), context
-        )
+        with Timer("prepare_audio_features"):
+            current_audio_features = self._prepare_audio_batch(
+                whisper_feature, batch_idx, len(faces), context
+            )
         
         # 3. Run diffusion inference on the current batch
-        synced_faces_batch, _ = self._run_diffusion_batch(
-            faces, current_audio_features, context
-        )
+        with Timer("diffusion_inference"):
+            synced_faces_batch, _ = self._run_diffusion_batch(
+                faces, current_audio_features, context
+            )
         
         # 4. 更新metadata_list中的face字段，存储处理后的人脸
-        for i, metadata in enumerate(metadata_list):
-            metadata.set_sync_face(synced_faces_batch[i])
+        with Timer("update_metadata"):
+            for i, metadata in enumerate(metadata_list):
+                metadata.set_sync_face(synced_faces_batch[i])
             
         return metadata_list
         
@@ -135,33 +139,51 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
         if whisper_feature is not None:
             chunks = self.audio_encoder.feature2chunks(feature_array=whisper_feature, fps=context.video_fps)
             total_audio_chunks = len(chunks)
-            print(f"Total audio feature count: {total_audio_chunks}, total video frame count: {total_frames}")
+            print(f"总音频特征数: {total_audio_chunks}, 总视频帧数: {total_frames}")
         
         # Initialize result storage
         metadata_list_all = []  # 存储所有批次的metadata列表
         
         # Start stream processing
-        print(f"Starting stream processing video: {video_path}")
-        print(f"Total frames: {total_frames}, each batch frame count: {context.num_frames}, expected batch count: {total_batches}")
+        print(f"开始流式处理视频: {video_path}")
+        print(f"总帧数: {total_frames}, 每批次帧数: {context.num_frames}, 预计批次数: {total_batches}")
         
+        # 在处理开始前，进行预热确保模型和CUDA内存已经初始化
+        if hasattr(self.face_processor, 'face_detector') and hasattr(self.face_processor.face_detector, 'maintain_session'):
+            print("进行模型预热，确保ONNX会话已激活...")
+            for _ in range(3):  # 连续进行多次预热，确保CUDA内存充分初始化
+                self.face_processor.face_detector.maintain_session()
+            print("预热完成")
+                
         batch_idx = 0
-        # 使用tqdm创建进度条
-        progress_bar = tqdm(total=total_frames, desc="Processing frames batch", unit="frame")
+        # 使用tqdm创建进度条，增加面部检测成功率统计
+        progress_bar = tqdm(total=total_frames, desc="处理视频帧", unit="帧")
+        face_detected_frames = 0
+        total_processed_frames = 0
+        
         while True:
             # 更新进度条描述，显示当前处理的批次
-            progress_bar.set_description(f"Processing batch {batch_idx+1}/{total_batches}")
+            progress_bar.set_description(f"处理批次 {batch_idx+1}/{total_batches}")
             
             # Read a batch of video frames
             frames, is_video_last_batch = self._read_frame_batch(video_capture, context.num_frames)
             
             if len(frames) == 0:
-                print("Video frames read completed, exiting processing")
+                print("视频帧读取完成，退出处理")
                 break
+                
+            # 在每个批次开始前维持会话活跃
+            if hasattr(self.face_processor, 'face_detector') and hasattr(self.face_processor.face_detector, 'maintain_session'):
+                self.face_processor.face_detector.maintain_session()
                 
             # Process the batch
             metadata_list = self._process_batch(frames, whisper_feature, batch_idx, context)
+            
+            # 统计面部检测成功率
+            total_processed_frames += len(frames)
             if metadata_list is not None:
                 metadata_list_all.append(metadata_list)
+                face_detected_frames += len(metadata_list)
             
             # Check if audio features have ended
             audio_last_batch = False
@@ -174,12 +196,22 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
             # 更新进度条
             progress_bar.update(len(frames))
             
+            # 在批次之间主动维持会话活跃
+            if batch_idx < total_batches and hasattr(self.face_processor, 'face_detector') and hasattr(self.face_processor.face_detector, 'maintain_session'):
+                with Timer("maintain_face_detector_session"):
+                    self.face_processor.face_detector.maintain_session()
+            
             # Break if both video and audio are finished
             if is_video_last_batch and audio_last_batch:
                 break
         
         # 关闭进度条
         progress_bar.close()
+        
+        # 打印面部检测成功率
+        if total_processed_frames > 0:
+            detection_rate = face_detected_frames / total_processed_frames * 100
+            print(f"面部检测成功率: {detection_rate:.2f}% ({face_detected_frames}/{total_processed_frames})")
         
         # Close video capture
         video_capture.release()

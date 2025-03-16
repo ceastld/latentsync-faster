@@ -140,7 +140,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
                 return torch.device(module._hf_hook.execution_device)
         return self.device
 
-    @Timer()
+    # @Timer()
     def decode_latents(self, latents):
         latents = latents / self.vae.config.scaling_factor + self.vae.config.shift_factor
         latents = rearrange(latents, "b c f h w -> (b f) c h w")
@@ -178,7 +178,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
                 f" {type(callback_steps)}."
             )
 
-    @Timer()
+    # @Timer()
     def prepare_latents(self, context: LipsyncContext, num_frames: int):
         """Prepare latent variables for diffusion"""
         shape = (
@@ -196,7 +196,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         latents = latents * self.scheduler.init_noise_sigma
         return latents
 
-    @Timer()
+    # @Timer()
     def prepare_mask_latents(self, context: LipsyncContext, mask: torch.Tensor, masked_image: torch.Tensor):
         """Prepare mask latent variables"""
         # resize the mask to latents shape as we concatenate the mask to the latents
@@ -223,7 +223,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         )
         return mask, masked_image_latents
 
-    @Timer()
+    # @Timer()
     def prepare_image_latents(self, context: LipsyncContext, images: torch.Tensor):
         """Prepare image latent variables"""
         images = images.to(device=context.device, dtype=context.weight_dtype)
@@ -234,7 +234,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
         return image_latents
 
-    @Timer()
+    # @Timer()
     def paste_surrounding_pixels_back(self, decoded_latents, pixel_values, masks):
         # Paste the surrounding pixels back, because we only want to change the mouth region
         # pixel_values = pixel_values.to(device=device, dtype=weight_dtype)
@@ -281,7 +281,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
         return video_capture, total_frames
     
-    @Timer()
+    # @Timer()
     def _read_frame_batch(self, video_capture: cv2.VideoCapture, batch_size: int) -> tuple[List[np.ndarray], bool]:
         """Read a batch of video frames"""
         frames: List[np.ndarray] = []
@@ -303,7 +303,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
     def face_processor(self):
         return FaceProcessor(resolution=self.lipsync_context.resolution, device=self.lipsync_context.device)
 
-    @Timer()
+    # @Timer()
     def _denoising_step(self, latents, t, audio_embeds, mask_latents, masked_image_latents, image_latents, context: LipsyncContext):
         """Execute a single denoising step"""
         # Prepare model input
@@ -326,7 +326,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         
         return latents
 
-    @Timer()
+    # @Timer()
     def _run_diffusion_batch(self, faces: torch.Tensor, audio_features: Optional[List[torch.Tensor]],
                           context: LipsyncContext) -> tuple[torch.Tensor, dict]:
         """Run diffusion inference on a single batch"""
@@ -397,7 +397,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
         return decoded_latents, {}
     
-    @Timer()
+    # @Timer()
     def _restore_and_save_stream(self, metadata_list_all: List[List[LipsyncMetadata]],
                                audio_samples: torch.Tensor, video_fps: int,
                                audio_sample_rate: int, video_out_path: str) -> Optional[str]:

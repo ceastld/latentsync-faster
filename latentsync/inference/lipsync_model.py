@@ -28,7 +28,7 @@ class LipsyncModel:
         synced_faces_batch, _ = self.pipeline._run_diffusion_batch(faces, audio_features, self.context)
         return synced_faces_batch
 
-    @Timer()
+    # @Timer()
     @torch.no_grad()
     def process_batch(
         self,

@@ -38,7 +38,7 @@ class LatentSyncInference:
             if isinstance(v, MultiThreadInference):
                 yield v
 
-    @Timer()
+    # @Timer()
     def wait_loaded(self):
         for worker in self.workers:
             worker.wait_worker_loaded()

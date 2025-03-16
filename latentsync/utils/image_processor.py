@@ -48,7 +48,7 @@ class ImageProcessor:
         masked_pixel_values = pixel_values * self.mask_image
         return pixel_values, masked_pixel_values, self.mask_image[0:1]
 
-    @Timer()
+    # @Timer()
     def prepare_masks_and_masked_images(self, images: Union[torch.Tensor, np.ndarray]):
         if isinstance(images, np.ndarray):
             images = torch.from_numpy(images)
