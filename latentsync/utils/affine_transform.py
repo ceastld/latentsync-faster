@@ -76,8 +76,31 @@ class AlignRestore(object):
 
     def _init_gpu_helpers(self):
         """初始化GPU相关的辅助函数和变量"""
-        # 这些辅助方法将在使用GPU时被调用
+        # 预先初始化一些常用的GPU操作，以减少第一次调用restore_img时的延迟
         
+        # 创建一个小的测试张量并上传到GPU
+        test_tensor = torch.ones((3, 64, 64), device='cuda')
+        if self.use_fp16:
+            test_tensor = test_tensor.half()
+            
+        # 预热warp_affine_tensor操作
+        test_matrix = torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], device='cuda')
+        if self.use_fp16:
+            test_matrix = test_matrix.half()
+        _ = self.warp_affine_tensor(test_tensor, test_matrix.cpu().numpy(), (64, 64))
+        
+        # 预热erode_tensor操作
+        test_mask = torch.ones((64, 64), device='cuda')
+        if self.use_fp16:
+            test_mask = test_mask.half()
+        _ = self.erode_tensor(test_mask, 3)
+        
+        # 预热box_filter_tensor操作
+        _ = self.box_filter_tensor(test_mask, 3)
+        
+        # 清理GPU内存
+        torch.cuda.empty_cache()
+
     def to_tensor(self, img, permute=True):
         """将NumPy图像转换为PyTorch张量"""
         if not self.use_gpu:
