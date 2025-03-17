@@ -364,9 +364,9 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
         forward_upsample_size = False
         upsample_size = None
 
-        if any(s % default_overall_up_factor != 0 for s in sample.shape[-2:]):
-            logger.info("Forward upsample size to force interpolation output size.")
-            forward_upsample_size = True
+        # if any(s % default_overall_up_factor != 0 for s in sample.shape[-2:]):
+        #     logger.info("Forward upsample size to force interpolation output size.")
+        #     forward_upsample_size = True
 
         # prepare attention_mask
         if attention_mask is not None:
@@ -489,8 +489,8 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
         sample = self.conv_out(sample)
         
 
-        if not return_dict:
-            return (sample,)
+        # if not return_dict:
+        #     return (sample,)
 
         return UNet3DConditionOutput(sample=sample)
 

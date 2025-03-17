@@ -11,9 +11,9 @@ from latentsync.utils.timer import Timer
 
 
 class LipsyncModel:
-    def __init__(self, context: LipsyncContext):
+    def __init__(self, context: LipsyncContext, use_onnx: bool = False):
         self.context: LipsyncContext = context
-        self.pipeline = create_diffusion_pipeline(context)
+        self.pipeline = create_diffusion_pipeline(context, use_onnx=use_onnx)
         # Initialize restorer during initialization to avoid first-call delay
         self.restorer = AlignRestore()
 

@@ -188,8 +188,8 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
             context.height // self.vae_scale_factor,
             context.width // self.vae_scale_factor,
         )
-        rand_device = "cpu" if context.device.type == "mps" else context.device
-        latents = torch.randn(shape, generator=context.generator, device=rand_device, dtype=context.weight_dtype).to(context.device)
+        # rand_device = "cpu" if context.device.type == "mps" else context.device
+        latents = torch.randn(shape, generator=context.generator, device=context.device, dtype=context.weight_dtype).to(context.device)
         latents = latents.repeat(1, 1, num_frames, 1, 1)
 
         # scale the initial noise by the standard deviation required by the scheduler
