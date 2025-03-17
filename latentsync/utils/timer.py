@@ -2,20 +2,37 @@ import time
 from functools import wraps
 from typing import Dict, Optional, List
 
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+
 class Timer:
-    """A decorator class for measuring function execution time"""
+    """
+    A decorator class for measuring function execution time.
+    
+    This class provides accurate timing for both CPU and GPU operations.
+    When timing PyTorch GPU operations, it can synchronize CUDA to ensure
+    accurate measurements of asynchronous GPU operations.
+    """
     
     _stats: Dict[str, Dict[str, float | List[float]]] = {}
     _enabled: bool = False
     
-    def __init__(self, name: Optional[str] = None, print_args: bool = False):
+    def __init__(self, name: Optional[str] = None, print_args: bool = False, use_cuda: bool = True):
         """
         Args:
             name: Timer name, uses decorated function name if not provided
             print_args: Whether to print function arguments
+            use_cuda: Whether to synchronize CUDA operations before timing.
+                      When True and PyTorch is available, calls torch.cuda.synchronize()
+                      before and after the timed operation to ensure accurate
+                      measurement of asynchronous GPU operations.
         """
         self.name = name
         self.print_args = print_args
+        self.use_cuda = use_cuda and TORCH_AVAILABLE
         self.start_time = None
     
     def __call__(self, func):
@@ -26,9 +43,16 @@ class Timer:
         def wrapper(*args, **kwargs):
             if not Timer._enabled:
                 return func(*args, **kwargs)
+            
+            if self.use_cuda:
+                torch.cuda.synchronize()
                 
             start_time = time.time()
             result = func(*args, **kwargs)
+            
+            if self.use_cuda:
+                torch.cuda.synchronize()
+                
             elapsed_time = time.time() - start_time
             
             if self.name not in Timer._stats:
@@ -58,6 +82,10 @@ class Timer:
         """支持上下文管理器协议的入口方法"""
         if not Timer._enabled:
             return self
+            
+        if self.use_cuda:
+            torch.cuda.synchronize()
+            
         self.start_time = time.time()
         return self
 
@@ -65,6 +93,9 @@ class Timer:
         """支持上下文管理器协议的退出方法"""
         if not Timer._enabled or self.start_time is None:
             return
+        
+        if self.use_cuda:
+            torch.cuda.synchronize()
             
         elapsed_time = time.time() - self.start_time
         
