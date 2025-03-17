@@ -6,13 +6,14 @@ from latentsync.inference.utils import load_audio_clips
 from latentsync.utils.face_processor import FaceProcessor
 from latentsync.utils.timer import Timer
 from latentsync.utils.video import save_frames_to_video, VideoReader
+import argparse
 
 
-def run_inference(video_path: str, audio_path: str, output_path: str):
+def run_inference(video_path: str, audio_path: str, output_path: str, use_onnx: bool = False):
     # Initialize model and context
     context = LipsyncContext(use_compile=False)
 
-    lipsync_model = LipsyncModel(context)
+    lipsync_model = LipsyncModel(context, use_onnx=use_onnx)
 
     batch_size = context.num_frames
 
@@ -66,12 +67,21 @@ def run_inference(video_path: str, audio_path: str, output_path: str):
 
 
 if __name__ == "__main__":
-    # Example usage
-    video_path = "assets/obama.mp4"
-    audio_path = "assets/cxk.mp3"
-    output_path = "output/obama_cxk1.mp4"
+    # 添加命令行参数解析
+    parser = argparse.ArgumentParser(description="LatentSync 视频唇形同步")
+    parser.add_argument('--video', type=str, default="assets/obama.mp4", help='输入视频路径')
+    parser.add_argument('--audio', type=str, default="assets/cxk.mp3", help='输入音频路径')
+    parser.add_argument('--output', type=str, default="output/obama_cxk1.mp4", help='输出视频路径')
+    # parser.add_argument('--use_onnx', type=bool, default=True, help='使用ONNX模型加速')
+    parser.add_argument('--use_onnx', type=bool, default=False, help='使用ONNX模型加速')
+    
+    args = parser.parse_args()
+    
+    # 显示使用的模型类型
+    model_type = "ONNX" if args.use_onnx else "PyTorch"
+    print(f"使用{model_type}模型进行推理...")
 
     Timer.enable()
-    run_inference(video_path, audio_path, output_path)
+    run_inference(args.video, args.audio, args.output, use_onnx=args.use_onnx)
     Timer.summary()
-    print(output_path)
+    print(f"输出视频保存到: {args.output}")

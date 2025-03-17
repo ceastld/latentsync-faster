@@ -64,6 +64,27 @@ class LipsyncContext:
             unet.enable_xformers_memory_efficient_attention()
         return unet.eval().to(dtype=self.weight_dtype)
 
+    def create_unet_onnx(self) -> UNet3DConditionModel:
+        """Create ONNX UNet model for diffusion with same interface as PyTorch UNet"""
+        import os
+        from latentsync.models.onnx_wrapper import ONNXModelWrapper
+        
+        # 构建ONNX模型路径 - 使用相同的名称但后缀为.onnx
+        onnx_path = os.path.join(os.path.dirname(GLOBAL_CONFIG.latentsync_unet_path), 
+                                "latentsync_unet.onnx")
+        
+        # 检查ONNX模型是否存在
+        if not os.path.exists(onnx_path):
+            raise FileNotFoundError(f"ONNX model not found at {onnx_path}. Please export the model first.")
+        
+        # 创建ONNX模型包装器
+        unet = ONNXModelWrapper(onnx_path, device=self.device)
+        
+        # 设置与PyTorch模型相同的dtype属性（仅用于欺骗编译器，不影响实际运行）
+        unet.dtype = self.weight_dtype
+        
+        return unet
+
     def create_vae(self) -> AutoencoderTiny:
         """Create VAE model for encoding/decoding images"""
         vae = AutoencoderTiny.from_pretrained("madebyollin/taesd", torch_dtype=self.weight_dtype)
