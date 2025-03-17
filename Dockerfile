@@ -32,7 +32,7 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
 RUN pip3 install --no-cache-dir numba
 RUN pip3 install --no-cache-dir -r requirements.txt
 RUN pip3 install --no-cache-dir huggingface_hub
-
+RUN python3 -c "from diffusers import AutoencoderTiny; vae = AutoencoderTiny.from_pretrained('madebyollin/taesd')"
 # Create directories for checkpoints
 RUN mkdir -p ~/.cache/torch/hub/checkpoints
 # Download checkpoints from HuggingFace
@@ -44,3 +44,4 @@ RUN mkdir -p ~/.cache/torch/hub/checkpoints
 RUN ln -sf $(pwd)/checkpoints/auxiliary/2DFAN4-cd938726ad.zip ~/.cache/torch/hub/checkpoints/2DFAN4-cd938726ad.zip
 RUN ln -sf $(pwd)/checkpoints/auxiliary/s3fd-619a316812.pth ~/.cache/torch/hub/checkpoints/s3fd-619a316812.pth
 RUN ln -sf $(pwd)/checkpoints/auxiliary/vgg16-397923af.pth ~/.cache/torch/hub/checkpoints/vgg16-397923af.pth
+RUN pip install --no-cache-dir gradio

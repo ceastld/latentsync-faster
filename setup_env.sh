@@ -23,7 +23,7 @@ pip install -r requirements.txt
 sudo apt -y install libgl1
 
 # Download all the checkpoints from HuggingFace
-huggingface-cli download ByteDance/LatentSync --local-dir checkpoints --exclude "*.git*" "README.md"
+git clone https://huggingface.co/Pinch-Research/latentsync checkpoints
 
 # Soft links for the auxiliary models
 mkdir -p ~/.cache/torch/hub/checkpoints
@@ -31,8 +31,6 @@ ln -s $(pwd)/checkpoints/auxiliary/2DFAN4-cd938726ad.zip ~/.cache/torch/hub/chec
 ln -s $(pwd)/checkpoints/auxiliary/s3fd-619a316812.pth ~/.cache/torch/hub/checkpoints/s3fd-619a316812.pth
 ln -s $(pwd)/checkpoints/auxiliary/vgg16-397923af.pth ~/.cache/torch/hub/checkpoints/vgg16-397923af.pth
 
-# 设置人脸检测模型
-echo "设置人脸检测模型..."
-python scripts/setup_face_detection.py
 
-git clone https://huggingface.co/Pinch-Research/latentsync checkpoints
+# download vae model
+python -c "from diffusers import AutoencoderTiny; vae = AutoencoderTiny.from_pretrained('madebyollin/taesd')"

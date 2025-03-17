@@ -9,13 +9,35 @@ pytorch docker images: [pytorch/pytorch Tags | Docker Hub](https://hub.docker.co
 
 huggingface model repo: [Pinch-Research/latentsync · Hugging Face](https://huggingface.co/Pinch-Research/latentsync)
 
-## build
+## 使用Docker Compose
+
+### 构建和运行
+```bash
+# 安装nvidia-container-toolkit（如果尚未安装）
+sudo apt-get install -y nvidia-container-toolkit
+sudo apt install docker-compose-plugin
+
+# 构建并启动容器
+docker compose up -d
+
+# 进入容器
+docker compose exec latentsync bash
+```
+
+### 停止容器
+```bash
+docker compose down
+```
+
+## 使用Docker命令（传统方式）
+
+### build
 ```bash
 sudo apt-get install -y nvidia-container-toolkit
 docker build -t latentsync .
 ```
 
-## run
+### run
 ```bash
 docker run -it --gpus all -v $(pwd):/app -w /app latentsync
 ```
