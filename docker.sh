@@ -1,0 +1,1 @@
+docker run -it --gpus all -v $(pwd):/app -w /app latentsync

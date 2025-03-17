@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, Optional, override
+from typing import List, Optional
 import numpy as np
 import torch
 from tqdm import tqdm

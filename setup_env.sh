@@ -1,4 +1,5 @@
 #!/bin/bash
+# cudnn9,cuda12.4
 
 # Create a new conda environment
 conda create -n latentsync python=3.12.9 -y

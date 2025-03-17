@@ -1,22 +1,24 @@
-FROM nvidia/cuda:12.4.0-devel-ubuntu22.04
+FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     wget \
     curl \
+    gnupg \
     ca-certificates \
     libgl1 \
     libglib2.0-0 \
-    python3-pip \
-    python3-dev \
-    ffmpeg \
+    software-properties-common \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get -y update
+RUN apt-get install -y ffmpeg
 
 # Set working directory
 WORKDIR /app
@@ -25,9 +27,9 @@ WORKDIR /app
 COPY requirements.txt .
 COPY scripts/setup_face_detection.py scripts/
 
-# Install Python dependencies
+# Install Python dependencies in the specified order
+# RUN pip3 install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
-RUN pip3 install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 RUN pip3 install --no-cache-dir numba
 RUN pip3 install --no-cache-dir -r requirements.txt
 RUN pip3 install --no-cache-dir huggingface_hub
@@ -37,23 +39,15 @@ RUN mkdir -p checkpoints/whisper checkpoints/auxiliary
 RUN mkdir -p ~/.cache/torch/hub/checkpoints
 
 # Download checkpoints from HuggingFace
-RUN python3 -c "from huggingface_hub import hf_hub_download; \
-    hf_hub_download(repo_id='ByteDance/LatentSync', filename='latentsync_unet.pt', local_dir='checkpoints'); \
-    hf_hub_download(repo_id='ByteDance/LatentSync', filename='whisper/tiny.pt', local_dir='checkpoints')"
+RUN huggingface-cli download ByteDance/LatentSync --local-dir checkpoints --exclude "*.git*" "README.md"
+
+# Copy the rest of the application
+# COPY . .
+
+# Create symbolic links for auxiliary models
+RUN ln -sf $(pwd)/checkpoints/auxiliary/2DFAN4-cd938726ad.zip ~/.cache/torch/hub/checkpoints/2DFAN4-cd938726ad.zip
+RUN ln -sf $(pwd)/checkpoints/auxiliary/s3fd-619a316812.pth ~/.cache/torch/hub/checkpoints/s3fd-619a316812.pth
+RUN ln -sf $(pwd)/checkpoints/auxiliary/vgg16-397923af.pth ~/.cache/torch/hub/checkpoints/vgg16-397923af.pth
 
 # Set up face detection models
 RUN python3 scripts/setup_face_detection.py
-
-# Copy the rest of the application
-COPY . .
-
-# Create symbolic links for auxiliary models
-RUN ln -sf $(pwd)/checkpoints/auxiliary/2DFAN4-cd938726ad.zip ~/.cache/torch/hub/checkpoints/2DFAN4-cd938726ad.zip || true
-RUN ln -sf $(pwd)/checkpoints/auxiliary/s3fd-619a316812.pth ~/.cache/torch/hub/checkpoints/s3fd-619a316812.pth || true
-RUN ln -sf $(pwd)/checkpoints/auxiliary/vgg16-397923af.pth ~/.cache/torch/hub/checkpoints/vgg16-397923af.pth || true
-
-# Make inference script executable
-RUN chmod +x inference.sh
-
-# Set default command
-# ENTRYPOINT ["./inference.sh"] 

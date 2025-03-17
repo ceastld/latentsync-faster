@@ -65,7 +65,7 @@ class FaceProcessor:
 
         return face, box, affine_matrix
     
-    # @Timer()
+    @Timer()
     @torch.no_grad()
     def prepare_face(self, frame: np.ndarray):
         face, box, affine_matrix = self.affine_transform(frame)
@@ -129,6 +129,8 @@ def test_face_alignment():
 
 
 if __name__ == "__main__":
-    # Timer.enable()
+    Timer.enable()
     test_face_processor()
     Timer.summary()
+
+

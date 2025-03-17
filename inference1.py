@@ -41,25 +41,18 @@ def run_inference(video_path: str, audio_path: str, output_path: str):
 
     while frame_idx < total_frames:
         batch_metadata = []
-
         frames_batch = video_reader.read_batch(batch_size)
-
         batch_metadata = face_processor.prepare_face_batch(frames_batch)
-
         if not batch_metadata:
             break
-
         current_audio_samples = audio_clips[frame_idx : frame_idx + len(frames_batch)].flatten()
         batch_audio_features = audio_processor.process_audio_with_pre(last_audio_samples, current_audio_samples)
         last_audio_samples = current_audio_samples
-
         output_metadata = lipsync_model.process_batch(
             metadata_list=batch_metadata,
             audio_features=batch_audio_features,
         )
-
         output_frames = lipsync_model.restore_batch(output_metadata)
-
         processed_frames.extend(output_frames)
         frame_idx += len(frames_batch)
         pbar.update(len(frames_batch))

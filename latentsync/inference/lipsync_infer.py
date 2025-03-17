@@ -3,7 +3,7 @@ from latentsync.inference.lipsync_model import LipsyncModel
 from latentsync.inference.multi_infer import MultiThreadInference
 from latentsync.pipelines.metadata import LipsyncMetadata
 import torch
-from typing import List, override
+from typing import List
 
 from latentsync.utils.affine_transform import AlignRestore
 
