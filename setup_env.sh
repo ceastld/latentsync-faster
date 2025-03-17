@@ -35,6 +35,4 @@ ln -s $(pwd)/checkpoints/auxiliary/vgg16-397923af.pth ~/.cache/torch/hub/checkpo
 echo "设置人脸检测模型..."
 python scripts/setup_face_detection.py
 
-cd checkpoints
-git clone https://huggingface.co/Pinch-Research/latentsync
-cd ..
+git clone https://huggingface.co/Pinch-Research/latentsync checkpoints

@@ -3,6 +3,8 @@ import onnx
 from onnx import helper, shape_inference
 from onnxruntime.tools.symbolic_shape_infer import SymbolicShapeInference
 
+from latentsync.configs.config import GLOBAL_CONFIG
+
 def remove_unused_initializers(model_path):
     """
     Remove unused initializers and batch norm tracking variables from the ONNX model.
@@ -64,7 +66,7 @@ def remove_unused_initializers(model_path):
 
 if __name__ == "__main__":
     # Fix both models
-    models_dir = os.path.join(os.path.dirname(__file__), "models")
+    models_dir = GLOBAL_CONFIG.checkpoint_dir
     face_detector_path = os.path.join(models_dir, "face_detector.onnx")
     landmark_detector_path = os.path.join(models_dir, "landmark_detector.onnx")
     

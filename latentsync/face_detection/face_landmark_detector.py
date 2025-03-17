@@ -6,6 +6,7 @@ import onnxruntime as ort
 from typing import List, Optional, Tuple, Union
 
 from latentsync.utils.timer import Timer
+from latentsync.configs.config import GLOBAL_CONFIG
 
 from .utils.box_utils import hard_nms
 
@@ -28,9 +29,9 @@ class FaceLandmarkDetector:
         
         # 设置默认模型路径
         if face_detector_path is None:
-            face_detector_path = os.path.join(os.path.dirname(__file__), "models", "face_detector_fixed.onnx")
+            face_detector_path = GLOBAL_CONFIG.face_detector_path
         if landmark_detector_path is None:
-            landmark_detector_path = os.path.join(os.path.dirname(__file__), "models", "landmark_detector_fixed.onnx")
+            landmark_detector_path = GLOBAL_CONFIG.landmark_detector_path
         
         self.face_detector_path = face_detector_path
         self.landmark_detector_path = landmark_detector_path

@@ -25,7 +25,6 @@ WORKDIR /app
 
 # Copy requirements and setup files
 COPY requirements.txt .
-COPY scripts/setup_face_detection.py scripts/
 
 # Install Python dependencies in the specified order
 # RUN pip3 install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
@@ -35,19 +34,13 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 RUN pip3 install --no-cache-dir huggingface_hub
 
 # Create directories for checkpoints
-RUN mkdir -p checkpoints/whisper checkpoints/auxiliary
 RUN mkdir -p ~/.cache/torch/hub/checkpoints
-
 # Download checkpoints from HuggingFace
-RUN huggingface-cli download ByteDance/LatentSync --local-dir checkpoints --exclude "*.git*" "README.md"
-
+# RUN git clone https://huggingface.co/Pinch-Research/latentsync checkpoints
 # Copy the rest of the application
-# COPY . .
+# COPY ./checkpoints ./checkpoints
 
 # Create symbolic links for auxiliary models
 RUN ln -sf $(pwd)/checkpoints/auxiliary/2DFAN4-cd938726ad.zip ~/.cache/torch/hub/checkpoints/2DFAN4-cd938726ad.zip
 RUN ln -sf $(pwd)/checkpoints/auxiliary/s3fd-619a316812.pth ~/.cache/torch/hub/checkpoints/s3fd-619a316812.pth
 RUN ln -sf $(pwd)/checkpoints/auxiliary/vgg16-397923af.pth ~/.cache/torch/hub/checkpoints/vgg16-397923af.pth
-
-# Set up face detection models
-RUN python3 scripts/setup_face_detection.py

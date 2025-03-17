@@ -19,3 +19,12 @@ docker build -t latentsync .
 ```bash
 docker run -it --gpus all -v $(pwd):/app -w /app latentsync
 ```
+
+## 人脸检测模型
+
+项目使用以下人脸检测模型：
+
+- 人脸检测模型: [pytorch_face_landmark/version-RFB-320.onnx](https://github.com/cunjian/pytorch_face_landmark/raw/master/models/onnx/version-RFB-320.onnx)
+- 人脸关键点检测模型: [pytorch_face_landmark/landmark_detection_56_se_external.onnx](https://github.com/cunjian/pytorch_face_landmark/raw/master/onnx/landmark_detection_56_se_external.onnx)
+
+这些模型来源于 [cunjian/pytorch_face_landmark](https://github.com/cunjian/pytorch_face_landmark) 项目。
