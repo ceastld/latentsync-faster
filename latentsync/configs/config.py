@@ -38,7 +38,7 @@ class Config:
 
     @cached_property
     def latentsync_unet_path(self):
-        return os.path.join(CHECKPOINT_DIR, "latentsync_unet.pt")
+        return os.path.join(CHECKPOINT_DIR, "latentsync/latentsync_unet.pt")
 
     @cached_property
     def lipsync(self):

@@ -17,7 +17,7 @@ python inference1.py --video assets/obama.mp4 --audio assets/cxk.mp3 --output ou
 如果您还没有ONNX模型，可以使用`export_unet_to_onnx.py`脚本将PyTorch模型导出为ONNX格式：
 
 ```bash
-python export_unet_to_onnx.py --model_path checkpoints/latentsync_unet.pt --output_path checkpoints/latentsync_unet.onnx --fp16
+python export_unet_to_onnx.py --model_path checkpoints/latentsync/latentsync_unet.pt --output_path checkpoints/latentsync_unet.onnx --fp16
 ```
 
 参数说明：
