@@ -69,14 +69,12 @@ class AudioInference(MultiThreadInference):
     def get_model(self):
         return AudioProcessor(self.context)
 
-    @override
     def worker(self):
         self.audio_buffer = []
         self.result_start_id = 0
         self.last_audio_samples = None
         super().worker()
 
-    @override
     def process_task(self, model: AudioProcessor, idx, audio_clip: np.ndarray):
         audio_buffer = self.audio_buffer
         if len(audio_buffer) == 0:

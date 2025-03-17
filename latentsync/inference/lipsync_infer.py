@@ -19,13 +19,11 @@ class LipsyncInference(MultiThreadInference):
     def push_data(self, data: LipsyncMetadata):
         self.add_one_task(data)
 
-    @override
     def worker(self):
         self.data_buffer: List[LipsyncMetadata] = []
         self.result_start_idx = 0
         super().worker()
 
-    @override
     def process_task(self, model: LipsyncModel, idx, data: LipsyncMetadata):
         data_buffer = self.data_buffer
         if len(data_buffer) == 0:
