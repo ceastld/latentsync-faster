@@ -72,16 +72,15 @@ if __name__ == "__main__":
     parser.add_argument('--video', type=str, default="assets/obama.mp4", help='输入视频路径')
     parser.add_argument('--audio', type=str, default="assets/cxk.mp3", help='输入音频路径')
     parser.add_argument('--output', type=str, default="output/obama_cxk1.mp4", help='输出视频路径')
-    # parser.add_argument('--use_onnx', type=bool, default=True, help='使用ONNX模型加速')
-    parser.add_argument('--use_onnx', type=bool, default=False, help='使用ONNX模型加速')
+    parser.add_argument('--onnx', action='store_true', help='使用ONNX模型加速')
     
     args = parser.parse_args()
     
     # 显示使用的模型类型
-    model_type = "ONNX" if args.use_onnx else "PyTorch"
+    model_type = "ONNX" if args.onnx else "PyTorch"
     print(f"使用{model_type}模型进行推理...")
 
     Timer.enable()
-    run_inference(args.video, args.audio, args.output, use_onnx=args.use_onnx)
+    run_inference(args.video, args.audio, args.output, use_onnx=args.onnx)
     Timer.summary()
     print(f"输出视频保存到: {args.output}")

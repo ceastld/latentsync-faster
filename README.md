@@ -5,9 +5,13 @@
 03/11/25: The inference process has been packaged into several functions in batch mode. Search `core function` to find the key components of face_processor, audio_processor (todo) and diffusion_processor.
 
 # Docker
+pytorch docker images: [pytorch/pytorch Tags | Docker Hub](https://hub.docker.com/r/pytorch/pytorch/tags)
+
+huggingface model repo: [Pinch-Research/latentsync · Hugging Face](https://huggingface.co/Pinch-Research/latentsync)
 
 ## build
 ```bash
+sudo apt-get install -y nvidia-container-toolkit
 docker build -t latentsync .
 ```
 
