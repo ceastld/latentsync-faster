@@ -14,6 +14,8 @@ stream inference
 * 串行 14.7 fps
 * 并行 17.2 fps
 
+* 大分辨率图像的 restore_img 优化，ROI 策略，提前计算出仿射变换影响区域，只将需要的部分放入GPU进行计算
+
 # speed test
 * ori var and unet
 ```

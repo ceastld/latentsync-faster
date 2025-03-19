@@ -401,9 +401,6 @@ class AlignRestore(object):
     # @Timer()
     def _restore_img_gpu(self, input_img, face, affine_matrix):
         """使用GPU实现的还原图像函数，支持FP16"""
-        # 缓存输入图像，以便在ROI优化中使用
-        self.last_input_img = input_img.copy()
-        
         # 步骤1: 初始化和调整大小
         h, w, _ = input_img.shape
         h_up, w_up = h, w  # 由于upscale_factor==1，直接使用原始尺寸
@@ -457,10 +454,11 @@ class AlignRestore(object):
         roi_inverse_affine = inverse_affine.copy()
         roi_inverse_affine[:, 2] -= [x_min, y_min]
         
-        return self._restore_img_gpu_roi_optimized(face, roi_inverse_affine, roi_input_img_t, input_img.shape, h_up, w_up, x_min, y_min, x_max, y_max)
+        # 直接传递整个input_img，而不是通过self缓存
+        return self._restore_img_gpu_roi_optimized(face, roi_inverse_affine, roi_input_img_t, input_img, h_up, w_up, x_min, y_min, x_max, y_max)
 
-    def _restore_img_gpu_roi_optimized(self, face, roi_inverse_affine, roi_input_img_t, full_img_shape, h_up, w_up, x_min, y_min, x_max, y_max):
-        """优化版本的ROI区域处理实现，仅接收ROI区域的张量"""
+    def _restore_img_gpu_roi_optimized(self, face, roi_inverse_affine, roi_input_img_t, original_img, h_up, w_up, x_min, y_min, x_max, y_max):
+        """优化版本的ROI区域处理实现，仅接收ROI区域的张量和原始图像"""
         # 获取ROI尺寸
         roi_h = y_max - y_min
         roi_w = x_max - x_min
@@ -532,23 +530,8 @@ class AlignRestore(object):
         else:
             roi_result = roi_result.astype(np.uint8)
         
-        # 获取原始图像的副本，而不是创建全零数组
-        # 我们需要先获取input_img，它是通过函数参数full_img_shape获取的
-        full_h, full_w, _ = full_img_shape
-        
-        # 这里处理两种情况:
-        # 1. 如果调用者传递了完整的input_img对象，则使用它
-        # 2. 否则，我们需要重新构建输入图像
-        if hasattr(self, 'last_input_img') and self.last_input_img.shape == full_img_shape:
-            # 使用缓存的原始图像
-            result = self.last_input_img.copy()
-        else:
-            # 如果没有原始图像缓存，则处理仅ROI区域的情况
-            # 创建一个与原始图像相同大小的图像
-            result = np.zeros(full_img_shape, dtype=np.uint8)
-            
-            # 可以在这里添加日志提示这种情况
-            print("Warning: Using zero-initialized image as original image is not available")
+        # 直接使用传入的原始图像，而不是使用self缓存
+        result = original_img.copy()
             
         # 将ROI区域放回原图
         result[y_min:y_max, x_min:x_max] = roi_result
