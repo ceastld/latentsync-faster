@@ -132,12 +132,12 @@ class LatentSyncInference:
             worker.add_end_task()
 
 
-async def auto_push_data(video_path, audio_path, model: LatentSyncInference, max_frames: int = 1000):
+async def auto_push_data(video_path, audio_path, model: LatentSyncInference, max_frames: int = 400):
     audio_clips = load_audio_clips(audio_path, model.context.samples_per_frame)
     for i, frame in enumerate(cycle_video_stream(video_path, max_frames)):
         model.push_frame(frame)
         model.push_audio(audio_clips[i % len(audio_clips)])
-        await asyncio.sleep(1 / 20)
+        await asyncio.sleep(1 / 40)
     model.add_end_task()
 
 
@@ -173,6 +173,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    Timer.enable()
+    # Timer.enable()
     asyncio.run(main())
     Timer.summary()
+

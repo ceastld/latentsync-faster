@@ -3,7 +3,7 @@ import torch
 import torchvision
 from einops import rearrange
 from latentsync.utils.timer import Timer
-
+from PIL import Image
 from dataclasses import dataclass
 
 
@@ -29,3 +29,10 @@ class LipsyncMetadata:
         face = (face * 255).to(torch.uint8)
         face = face.cpu().numpy()
         self.sync_face = face
+
+    def restore_face(self):
+        x1, y1, x2, y2 = self.box
+        image = self.original_frame.copy()
+        print(self.affine_matrix)
+        image[y1:y2, x1:x2] = self.sync_face
+        return image

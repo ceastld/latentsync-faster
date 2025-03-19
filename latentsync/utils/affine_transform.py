@@ -295,16 +295,14 @@ class AlignRestore(object):
 
         # 应用仿射变换
         
-        img_t = img
+        # img_t = img
         cropped_face = cv2.warpAffine(
-        # img_t = self.to_tensor(img)
-        # cropped_face = self.warp_affine_tensor(
-            img_t,
+            img,
             affine_matrix,
             self.face_size,
             # flags=cv2.INTER_LANCZOS4,
             # borderMode=border_mode,
-            # borderValue=[127, 127, 1275],
+            # borderValue=[127, 127, 127],
         )
 
         # cropped_face = cropped_face.permute(2, 1, 0).to(torch.uint8).cpu().numpy()

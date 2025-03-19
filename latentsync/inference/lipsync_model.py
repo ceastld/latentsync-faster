@@ -36,7 +36,7 @@ class LipsyncModel:
         self,
         metadata_list: List[LipsyncMetadata],
         audio_features: Optional[List[torch.Tensor]],
-    ):
+    ) -> List[LipsyncMetadata]:
         faces = torch.stack([metadata.face for metadata in metadata_list])
         audio_features = self.audio_processor.align_audio_features(audio_features, len(faces))
 

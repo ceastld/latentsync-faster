@@ -67,7 +67,7 @@ class FaceProcessor:
     
     @Timer()
     @torch.no_grad()
-    def prepare_face(self, frame: np.ndarray):
+    def prepare_face(self, frame: np.ndarray) -> LipsyncMetadata:
         face, box, affine_matrix = self.affine_transform(frame)
         lipsync_metadata = LipsyncMetadata(
             face=face, box=box, affine_matrix=affine_matrix, original_frame=frame, sync_face=None
