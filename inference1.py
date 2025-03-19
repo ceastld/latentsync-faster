@@ -1,4 +1,5 @@
 from typing import List
+from latentsync.configs.config import GLOBAL_CONFIG
 from latentsync.inference.audio_infer import AudioProcessor
 from latentsync.inference.context import LipsyncContext
 from latentsync.inference.lipsync_model import LipsyncModel
@@ -71,20 +72,14 @@ def run_inference(video_path: str, audio_path: str, output_path: str, use_onnx: 
 
 
 if __name__ == "__main__":
-    # 添加命令行参数解析
     parser = argparse.ArgumentParser(description="LatentSync 视频唇形同步")
-    parser.add_argument('--video', type=str, default="assets/obama.mp4", help='输入视频路径')
-    parser.add_argument('--audio', type=str, default="assets/cxk.mp3", help='输入音频路径')
-    parser.add_argument('--output', type=str, default="output/obama_cxk1.mp4", help='输出视频路径')
-    parser.add_argument('--onnx', action='store_true', help='使用ONNX模型加速')
-    
+    parser.add_argument("--onnx", action="store_true", help="使用ONNX模型加速")
     args = parser.parse_args()
-    
-    # 显示使用的模型类型
     model_type = "ONNX" if args.onnx else "PyTorch"
     print(f"使用{model_type}模型进行推理...")
 
     Timer.enable()
-    run_inference(args.video, args.audio, args.output, use_onnx=args.onnx)
+    demo = GLOBAL_CONFIG.inference.demo1
+    run_inference(demo.video_path, demo.audio_path, demo.video_out_path, use_onnx=args.onnx)
     Timer.summary()
-    print(f"输出视频保存到: {args.output}")
+    print(f"输出视频保存到: {demo.video_out_path}")

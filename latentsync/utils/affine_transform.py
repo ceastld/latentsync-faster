@@ -401,87 +401,115 @@ class AlignRestore(object):
     # @Timer()
     def _restore_img_gpu(self, input_img, face, affine_matrix):
         """使用GPU实现的还原图像函数，支持FP16"""
+        # 缓存输入图像，以便在ROI优化中使用
+        self.last_input_img = input_img.copy()
+        
         # 步骤1: 初始化和调整大小
         h, w, _ = input_img.shape
-        h_up, w_up = int(h * self.upscale_factor), int(w * self.upscale_factor)
-        
-        # Convert to tensor and resize using torch
-        # with Timer("restore_input_to_tensor"):
-        input_img_t = self.to_tensor(input_img)
-        upsample_img_t = F.interpolate(
-            input_img_t.unsqueeze(0),  # Add batch dimension
-            size=(h_up, w_up),
-            mode='bicubic',  # bicubic is closest to LANCZOS4
-            align_corners=True
-        ).squeeze(0)  # Remove batch dimension
+        h_up, w_up = h, w  # 由于upscale_factor==1，直接使用原始尺寸
         
         # 步骤2: 创建反向仿射变换
         inverse_affine = cv2.invertAffineTransform(affine_matrix)
-        inverse_affine *= self.upscale_factor
-        if self.upscale_factor > 1:
-            extra_offset = 0.5 * self.upscale_factor
-        else:
-            extra_offset = 0
-        inverse_affine[:, 2] += extra_offset
+        # 由于upscale_factor==1，不需要乘以缩放因子和额外偏移量
         
-        # 步骤3: 应用反向仿射变换
-        # 转换face到PyTorch并上传到GPU
-        face_t = self.to_tensor(face)
-        # face_t = face.permute(2, 0, 1).half()
+        # 计算处理区域边界
+        # 获取脸部模板的四个角点
+        face_h, face_w = self.face_size[1], self.face_size[0]
+        corners = np.array([
+            [0, 0],
+            [face_w, 0],
+            [face_w, face_h],
+            [0, face_h]
+        ], dtype=np.float32)
         
-        # 使用PyTorch执行仿射变换
-        inv_restored_t = self.warp_affine_tensor(face_t, inverse_affine, (h_up, w_up))
+        # 使用逆仿射变换将角点映射回原图
+        transformed_corners = cv2.transform(corners.reshape(1, -1, 2), inverse_affine).reshape(-1, 2)
+        
+        # 计算边界框
+        x_min = max(0, int(np.floor(np.min(transformed_corners[:, 0]))))
+        y_min = max(0, int(np.floor(np.min(transformed_corners[:, 1]))))
+        x_max = min(w_up, int(np.ceil(np.max(transformed_corners[:, 0]))))
+        y_max = min(h_up, int(np.ceil(np.max(transformed_corners[:, 1]))))
+        
+        # 向外扩展边界5个像素
+        padding = 5
+        x_min = max(0, x_min - padding)
+        y_min = max(0, y_min - padding)
+        x_max = min(w_up, x_max + padding)
+        y_max = min(h_up, y_max + padding)
+        
+        # 计算ROI尺寸
+        roi_w = x_max - x_min
+        roi_h = y_max - y_min
+        
+        # 如果ROI很小或接近整个图像，就不进行ROI优化
+        if roi_w < 20 or roi_h < 20 or (roi_w > w_up * 0.9 and roi_h > h_up * 0.9):
+            # 使用原始方法处理整个图像
+            input_img_t = self.to_tensor(input_img)
+            return self._restore_img_gpu_full(face, inverse_affine, input_img_t, h_up, w_up)
+        
+        # 否则，只处理ROI区域 - 优化：先裁剪，再转换为张量
+        # 获取ROI区域
+        roi_input_img = input_img[y_min:y_max, x_min:x_max]
+        roi_input_img_t = self.to_tensor(roi_input_img)
+        
+        # 创建修改后的反向仿射变换矩阵，考虑ROI偏移
+        roi_inverse_affine = inverse_affine.copy()
+        roi_inverse_affine[:, 2] -= [x_min, y_min]
+        
+        return self._restore_img_gpu_roi_optimized(face, roi_inverse_affine, roi_input_img_t, input_img.shape, h_up, w_up, x_min, y_min, x_max, y_max)
 
-        # 步骤4: 创建和变换蒙版
-        # 创建蒙版并转换为PyTorch张量
+    def _restore_img_gpu_roi_optimized(self, face, roi_inverse_affine, roi_input_img_t, full_img_shape, h_up, w_up, x_min, y_min, x_max, y_max):
+        """优化版本的ROI区域处理实现，仅接收ROI区域的张量"""
+        # 获取ROI尺寸
+        roi_h = y_max - y_min
+        roi_w = x_max - x_min
+        
+        # 步骤3: 仅对ROI区域应用反向仿射变换
+        face_t = self.to_tensor(face)
+        inv_restored_t = self.warp_affine_tensor(face_t, roi_inverse_affine, (roi_h, roi_w))
+
+        # 步骤4: 创建和变换蒙版，仅对ROI区域
         mask = np.ones((self.face_size[1], self.face_size[0]), dtype=np.float32)
         mask_t = self.to_tensor(mask, permute=False)
         
-        # 执行蒙版的仿射变换
-        inv_mask_t = self.warp_affine_tensor(mask_t.unsqueeze(0), inverse_affine, (h_up, w_up))
+        inv_mask_t = self.warp_affine_tensor(mask_t.unsqueeze(0), roi_inverse_affine, (roi_h, roi_w))
         inv_mask_t = inv_mask_t.squeeze(0)
         
-        # 应用侵蚀
-        kernel_size = max(2, int(self.upscale_factor * 2))
+        # 针对upscale_factor==1优化侵蚀核心大小
+        kernel_size = 2  # 固定为2，因为upscale_factor==1
         inv_mask_erosion_t = self.erode_tensor(inv_mask_t, kernel_size)
         
-        # 步骤5: 计算面部区域和边缘 - GPU优化版
-        # 计算pasted_face - 确保维度正确
+        # 步骤5: 计算面部区域和边缘，仅对ROI区域
         inv_mask_erosion_3d = inv_mask_erosion_t.unsqueeze(0)
         
-        # 确保使用兼容的维度
         c, h, w = inv_restored_t.shape
         if inv_mask_erosion_3d.shape[1] != h or inv_mask_erosion_3d.shape[2] != w:
-            # 需要调整尺寸以匹配
             inv_mask_erosion_3d = F.interpolate(
                 inv_mask_erosion_3d.unsqueeze(1), 
                 size=(h, w), 
                 mode='bilinear', 
                 align_corners=False
             ).squeeze(1)
-
-
         
-        # 使用广播方式，确保维度匹配
+        # 直接使用ROI区域的张量
+        roi_upsample_img_t = roi_input_img_t
+        
         pasted_face_t = inv_mask_erosion_3d.unsqueeze(1) * inv_restored_t.unsqueeze(0)
-        pasted_face_t = pasted_face_t.squeeze(0)  # 移除批次维度
+        pasted_face_t = pasted_face_t.squeeze(0)
         
-        # 计算边缘大小 (固定计算方法)
-        w_edge = max(5, min(12, h_up // 100))
+        # 针对upscale_factor==1优化边缘计算
+        w_edge = 5  # 固定值，因为h_up==h且upscale_factor==1
         erosion_radius = w_edge * 2
         
-        # 应用第二次侵蚀
         inv_mask_center_t = self.erode_tensor(inv_mask_erosion_t, erosion_radius)
         
-        # 应用模糊
         blur_size = w_edge * 2
         if blur_size % 2 == 0:
             blur_size += 1
         inv_soft_mask_t = self.box_filter_tensor(inv_mask_center_t, blur_size)
         
-        # 进行维度扩展以匹配图像通道 - 确保维度正确
         if inv_soft_mask_t.shape[0] != h or inv_soft_mask_t.shape[1] != w:
-            # 需要调整尺寸以匹配
             inv_soft_mask_t = F.interpolate(
                 inv_soft_mask_t.unsqueeze(0).unsqueeze(0), 
                 size=(h, w), 
@@ -489,30 +517,47 @@ class AlignRestore(object):
                 align_corners=False
             ).squeeze(0).squeeze(0)
             
-        # 创建三通道软蒙版
         inv_soft_mask_3c_t = inv_soft_mask_t.unsqueeze(0).unsqueeze(0)
         inv_soft_mask_3c_t = inv_soft_mask_3c_t.expand(-1, c, -1, -1)
-        inv_soft_mask_3c_t = inv_soft_mask_3c_t.squeeze(0)  # 移除批次维度
+        inv_soft_mask_3c_t = inv_soft_mask_3c_t.squeeze(0)
         
-        # 步骤6: 最终图像合成 - GPU优化版
-        # 执行混合操作 - 确保维度匹配
-        result_t = inv_soft_mask_3c_t * pasted_face_t + (1 - inv_soft_mask_3c_t) * upsample_img_t
-
-        # 转回NumPy并处理数据类型
-        result = self.to_numpy(result_t)
+        # 步骤6: 仅在ROI区域合成
+        roi_result_t = inv_soft_mask_3c_t * pasted_face_t + (1 - inv_soft_mask_3c_t) * roi_upsample_img_t
         
-        if np.max(result) > 255:
-            result = result.astype(np.uint16)
+        # 处理ROI结果
+        roi_result = self.to_numpy(roi_result_t)
+        
+        if np.max(roi_result) > 255:
+            roi_result = roi_result.astype(np.uint16)
         else:
-            result = result.astype(np.uint8)
+            roi_result = roi_result.astype(np.uint8)
+        
+        # 获取原始图像的副本，而不是创建全零数组
+        # 我们需要先获取input_img，它是通过函数参数full_img_shape获取的
+        full_h, full_w, _ = full_img_shape
+        
+        # 这里处理两种情况:
+        # 1. 如果调用者传递了完整的input_img对象，则使用它
+        # 2. 否则，我们需要重新构建输入图像
+        if hasattr(self, 'last_input_img') and self.last_input_img.shape == full_img_shape:
+            # 使用缓存的原始图像
+            result = self.last_input_img.copy()
+        else:
+            # 如果没有原始图像缓存，则处理仅ROI区域的情况
+            # 创建一个与原始图像相同大小的图像
+            result = np.zeros(full_img_shape, dtype=np.uint8)
             
-        upsample_img = result
+            # 可以在这里添加日志提示这种情况
+            print("Warning: Using zero-initialized image as original image is not available")
+            
+        # 将ROI区域放回原图
+        result[y_min:y_max, x_min:x_max] = roi_result
         
         # 清理GPU内存
         if self.use_gpu:
             torch.cuda.empty_cache()
         
-        return upsample_img
+        return result
 
 
 class laplacianSmooth:
