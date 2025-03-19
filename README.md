@@ -1,19 +1,33 @@
-03/08/25: The dependencies are very confusing because of the application of the newest `diffusers` and `transformers`. But it is necessary for `torch.compile`. It can be run by installing every newest dependency seperately now. Later I will try to create a stable requirements file.
+# LatentSync
 
-03/09/25: The correct requirements have been settled down. Just `sh setup_env.sh`
+<div align="center">
 
-03/11/25: The inference process has been packaged into several functions in batch mode. Search `core function` to find the key components of face_processor, audio_processor (todo) and diffusion_processor.
+![LatentSync Logo](https://img.shields.io/badge/LatentSync-AI%20Synchronization-blue)
+[![HuggingFace](https://img.shields.io/badge/🤗%20HuggingFace-Pinch--Research%2Flatentsync-yellow)](https://huggingface.co/Pinch-Research/latentsync)
 
-# Docker
-pytorch docker images: [pytorch/pytorch Tags | Docker Hub](https://hub.docker.com/r/pytorch/pytorch/tags)
+</div>
 
-huggingface model repo: [Pinch-Research/latentsync · Hugging Face](https://huggingface.co/Pinch-Research/latentsync)
+## 📝 项目介绍
 
-## 使用Docker Compose
+LatentSync 是一个基于深度学习的多模态同步处理系统，集成了人脸处理、音频处理和扩散模型等多种功能。
 
-### 构建和运行
+## 🚀 快速开始
+
+### 环境配置
+
 ```bash
-# 安装nvidia-container-toolkit（如果尚未安装）
+# 配置环境（推荐方式）
+source setup_env.sh
+```
+
+## 🐳 Docker 部署
+
+项目提供两种 Docker 部署方式：
+
+### 方式一：使用 Docker Compose（推荐）
+
+```bash
+# 安装必要工具
 sudo apt-get install -y nvidia-container-toolkit
 sudo apt install docker-compose-plugin
 
@@ -22,31 +36,34 @@ docker compose up -d
 
 # 进入容器
 docker compose exec latentsync bash
-```
 
-### 停止容器
-```bash
+# 停止容器
 docker compose down
 ```
 
-## 使用Docker命令（传统方式）
+### 方式二：使用传统 Docker 命令
 
-### build
 ```bash
+# 构建镜像
 sudo apt-get install -y nvidia-container-toolkit
 docker build -t latentsync .
-```
 
-### run
-```bash
+# 运行容器
 docker run -it --gpus all -v $(pwd):/app -w /app latentsync
 ```
 
-## 人脸检测模型
+## 📦 模型资源
 
-项目使用以下人脸检测模型：
+### 人脸检测相关模型
 
-- 人脸检测模型: [pytorch_face_landmark/version-RFB-320.onnx](https://github.com/cunjian/pytorch_face_landmark/raw/master/models/onnx/version-RFB-320.onnx)
-- 人脸关键点检测模型: [pytorch_face_landmark/landmark_detection_56_se_external.onnx](https://github.com/cunjian/pytorch_face_landmark/raw/master/onnx/landmark_detection_56_se_external.onnx)
+本项目使用以下人脸检测模型：
 
-这些模型来源于 [cunjian/pytorch_face_landmark](https://github.com/cunjian/pytorch_face_landmark) 项目。
+- **人脸检测模型**: [version-RFB-320.onnx](https://github.com/cunjian/pytorch_face_landmark/raw/master/models/onnx/version-RFB-320.onnx)
+- **人脸关键点检测模型**: [landmark_detection_56_se_external.onnx](https://github.com/cunjian/pytorch_face_landmark/raw/master/onnx/landmark_detection_56_se_external.onnx)
+
+模型来源: [cunjian/pytorch_face_landmark](https://github.com/cunjian/pytorch_face_landmark)
+
+### 模型库
+
+- **PyTorch Docker 镜像**: [pytorch/pytorch Tags](https://hub.docker.com/r/pytorch/pytorch/tags)
+- **HuggingFace 模型**: [Pinch-Research/latentsync](https://huggingface.co/Pinch-Research/latentsync)
