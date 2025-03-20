@@ -3,6 +3,17 @@ import os
 import tensorrt as trt
 from typing import Dict, List, Tuple
 
+def check_tensorrt_version():
+    """检查 TensorRT 版本是否为 10.8.0.43"""
+    current_version = trt.__version__
+    required_version = "10.8.0.43"
+    if current_version != required_version:
+        raise RuntimeError(
+            f"TensorRT 版本不匹配。当前版本: {current_version}, 需要版本: {required_version}\n"
+            f"请确保使用正确的 TensorRT 版本。"
+        )
+    print(f"TensorRT 版本检查通过: {current_version}")
+
 def parse_args():
     parser = argparse.ArgumentParser(description="将ONNX模型转换为TensorRT格式")
     parser.add_argument(
@@ -46,6 +57,9 @@ def build_engine(
     """
     构建TensorRT引擎
     """
+    # 检查 TensorRT 版本
+    check_tensorrt_version()
+    
     logger = trt.Logger(trt.Logger.INFO)
     builder = trt.Builder(logger)
     network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))

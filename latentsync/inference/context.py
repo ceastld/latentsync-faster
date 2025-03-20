@@ -83,7 +83,7 @@ class LipsyncContext:
         
         # 构建ONNX模型路径 - 使用相同的名称但后缀为.onnx
         onnx_path = os.path.join(os.path.dirname(GLOBAL_CONFIG.latentsync_unet_path), 
-                                "latentsync/latentsync_unet.onnx")
+                                "unet.onnx")
         
         # 检查ONNX模型是否存在
         if not os.path.exists(onnx_path):
