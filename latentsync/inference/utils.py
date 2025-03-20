@@ -7,34 +7,32 @@ from latentsync.pipelines.lipsync_diffusion_pipeline import LipsyncDiffusionPipe
 from latentsync.whisper.whisper.audio import load_audio
 
 
-def create_diffusion_pipeline(context: LipsyncContext, use_onnx: bool = False) -> LipsyncDiffusionPipeline:
+def create_diffusion_pipeline(context: LipsyncContext) -> LipsyncDiffusionPipeline:
     """Create lipsync diffusion pipeline with all components
     
     Args:
         context: Lipsync context
-        use_onnx: Whether to use ONNX UNet model
     
     Returns:
         LipsyncDiffusionPipeline: The lipsync diffusion pipeline
     """
-    if use_onnx:
-        return LipsyncDiffusionPipeline(
-            vae=context.create_vae(),
-            unet=context.create_unet_onnx(),
-            scheduler=context.create_scheduler(),
-            lipsync_context=context,
-        ).to(context.device)
-    else:
-        return LipsyncDiffusionPipeline(
-            vae=context.create_vae(),
-            unet=context.create_unet(),
-            scheduler=context.create_scheduler(),
-            lipsync_context=context,
-        ).to(context.device)
+    return LipsyncDiffusionPipeline(
+        vae=context.create_vae(),
+        unet=context.create_unet(),
+        scheduler=context.create_scheduler(),
+        lipsync_context=context,
+    ).to(context.device)
 
 
 def create_pipeline(context: LipsyncContext) -> LipsyncPipeline:
-    """Create lipsync pipeline with all components"""
+    """Create lipsync pipeline with all components
+    
+    Args:
+        context: Lipsync context
+    
+    Returns:
+        LipsyncPipeline: The lipsync pipeline
+    """
     return LipsyncPipeline(
         vae=context.create_vae(),
         audio_encoder=context.create_audio_encoder(),

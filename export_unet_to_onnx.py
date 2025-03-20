@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument(
         "--output_path", 
         type=str, 
-        default="unet.onnx",
+        default="checkpoints/unet.onnx",
         help="ONNX输出文件路径"
     )
     parser.add_argument(
@@ -121,13 +121,6 @@ def main():
     # 导出为ONNX格式
     print(f"正在导出UNet模型为ONNX格式: {args.output_path}")
     
-    # 定义动态轴
-    dynamic_axes = {
-        "sample": {0: "batch_size", 2: "frames", 3: "height", 4: "width"},
-        "timestep": {0: "batch_size"},
-        "encoder_hidden_states": {0: "batch_size", 1: "sequence_length"}
-    }
-    
     # 确保输出目录存在
     output_dir = os.path.dirname(os.path.abspath(args.output_path))
     if output_dir and not os.path.exists(output_dir):
@@ -141,7 +134,7 @@ def main():
         "do_constant_folding": True,
         "input_names": ["sample", "timestep", "encoder_hidden_states"],
         "output_names": ["output"],
-        "dynamic_axes": dynamic_axes,
+        # "dynamic_axes": dynamic_axes,
         "verbose": False
     }
     
