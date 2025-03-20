@@ -19,7 +19,7 @@ class ONNXModelWrapper(torch.nn.Module):
         self.add_audio_layer = True
         
         # 设置ONNX运行时选项
-        providers = ['CUDAExecutionProvider'] if device == "cuda" else ['CPUExecutionProvider']
+        providers = ['TensorrtExecutionProvider', 'CUDAExecutionProvider'] if device == "cuda" else ['CPUExecutionProvider']
         session_options = ort.SessionOptions()
         # 设置图优化级别
         session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL

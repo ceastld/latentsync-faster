@@ -39,11 +39,18 @@ class LipsyncContext:
     num_channels_latents: int = None
     extra_step_kwargs: dict = None
 
+    # Model selection flags
     use_compile: bool = False
+    use_onnx: bool = False
+    use_trt: bool = False
 
     def __post_init__(self):
         # Set do_classifier_free_guidance based on guidance_scale
         self.do_classifier_free_guidance = self.guidance_scale > 1.0
+        
+        # Ensure only one model type is selected
+        if sum([self.use_compile, self.use_onnx, self.use_trt]) > 1:
+            raise ValueError("Only one of use_compile, use_onnx, or use_trt can be True at the same time")
 
     def create_audio_encoder(self) -> Audio2Feature:
         """Create audio encoder for processing audio samples"""
@@ -55,14 +62,19 @@ class LipsyncContext:
 
     def create_unet(self) -> UNet3DConditionModel:
         """Create UNet model for diffusion"""
-        unet, _ = UNet3DConditionModel.from_pretrained(
-            OmegaConf.to_container(GLOBAL_CONFIG.unet_config.model),
-            GLOBAL_CONFIG.latentsync_unet_path,
-            device=self.device,
-        )
-        if is_xformers_available():
-            unet.enable_xformers_memory_efficient_attention()
-        return unet.eval().to(dtype=self.weight_dtype)
+        if self.use_trt:
+            return self.create_unet_trt()
+        elif self.use_onnx:
+            return self.create_unet_onnx()
+        else:
+            unet, _ = UNet3DConditionModel.from_pretrained(
+                OmegaConf.to_container(GLOBAL_CONFIG.unet_config.model),
+                GLOBAL_CONFIG.latentsync_unet_path,
+                device=self.device,
+            )
+            if is_xformers_available():
+                unet.enable_xformers_memory_efficient_attention()
+            return unet.eval().to(dtype=self.weight_dtype)
 
     def create_unet_onnx(self) -> UNet3DConditionModel:
         """Create ONNX UNet model for diffusion with same interface as PyTorch UNet"""
@@ -71,7 +83,7 @@ class LipsyncContext:
         
         # 构建ONNX模型路径 - 使用相同的名称但后缀为.onnx
         onnx_path = os.path.join(os.path.dirname(GLOBAL_CONFIG.latentsync_unet_path), 
-                                "latentsync/latentsync_unet.onnx")
+                                "unet.onnx")
         
         # 检查ONNX模型是否存在
         if not os.path.exists(onnx_path):
@@ -79,6 +91,27 @@ class LipsyncContext:
         
         # 创建ONNX模型包装器
         unet = ONNXModelWrapper(onnx_path, device=self.device)
+        
+        # 设置与PyTorch模型相同的dtype属性（仅用于欺骗编译器，不影响实际运行）
+        unet.dtype = self.weight_dtype
+        
+        return unet
+
+    def create_unet_trt(self) -> UNet3DConditionModel:
+        """Create TensorRT UNet model for diffusion with same interface as PyTorch UNet"""
+        import os
+        from latentsync.models.trt_wrapper import TRTModelWrapper
+        
+        # 构建TensorRT引擎路径 - 使用相同的名称但后缀为.engine
+        engine_path = os.path.join(os.path.dirname(GLOBAL_CONFIG.latentsync_unet_path), 
+                                 "latentsync_unet.engine")
+        
+        # 检查TensorRT引擎是否存在
+        if not os.path.exists(engine_path):
+            raise FileNotFoundError(f"TensorRT engine not found at {engine_path}. Please export the model first.")
+        
+        # 创建TensorRT模型包装器
+        unet = TRTModelWrapper(engine_path, device=self.device)
         
         # 设置与PyTorch模型相同的dtype属性（仅用于欺骗编译器，不影响实际运行）
         unet.dtype = self.weight_dtype
