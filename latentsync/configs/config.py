@@ -22,7 +22,11 @@ class Config:
 
     @cached_property
     def unet_config(self):
-        return OmegaConf.load(self.get_config_path("unet/second_stage.yaml"))
+        return OmegaConf.load(self.get_config_path("unet/stage2_v1.yaml"))
+
+    @cached_property
+    def unet_config_v15(self):
+        return OmegaConf.load(self.get_config_path("unet/stage2_v15.yaml"))
 
     @cached_property
     def audio_config(self):
@@ -41,6 +45,10 @@ class Config:
         return os.path.join(CHECKPOINT_DIR, "latentsync_unet.pt")
 
     @cached_property
+    def latentsync_unet_path_v15(self):
+        return os.path.join(CHECKPOINT_DIR, "v15", "latentsync_unet.pt")
+
+    @cached_property
     def face_detector_path(self):
         return os.path.join(CHECKPOINT_DIR, "face/face_detector_fixed.onnx")
 
@@ -51,6 +59,10 @@ class Config:
     @cached_property
     def lipsync(self):
         return LipsyncConfig()
+
+    @cached_property
+    def lipsync_v15(self):
+        return LipsyncConfig_v15()
 
     @cached_property
     def inference(self):
@@ -71,7 +83,7 @@ class LipsyncConfig:
     audio_batch_size = 20
 
     # Frame parameters
-    num_frames = 8  # batch size
+    num_frames = 8
     height = 256
     width = 256
 
@@ -80,6 +92,10 @@ class LipsyncConfig:
     guidance_scale = 1.5
     weight_dtype = get_dtype()
     eta = 0.0
+
+
+class LipsyncConfig_v15(LipsyncConfig):
+    num_frames = 16
 
 
 @dataclass
@@ -128,3 +144,4 @@ GLOBAL_CONFIG = Config()
 if __name__ == "__main__":
     print(GLOBAL_CONFIG.whisper_model_path)
     print(GLOBAL_CONFIG.inference.default_audio_path)
+    print(GLOBAL_CONFIG.lipsync.num_frames)

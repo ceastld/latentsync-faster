@@ -14,7 +14,7 @@ import torch
 import tqdm
 from diffusers import DiffusionPipeline
 from diffusers.configuration_utils import FrozenDict
-from diffusers.models import AutoencoderKL
+from diffusers.models import AutoencoderKL, AutoencoderTiny
 from diffusers.schedulers import DDIMScheduler, DPMSolverMultistepScheduler, EulerAncestralDiscreteScheduler, EulerDiscreteScheduler, LMSDiscreteScheduler, PNDMScheduler
 from diffusers.utils import deprecate, is_accelerate_available
 from einops import rearrange
@@ -32,7 +32,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
     _optional_components = []
     def __init__(
         self,
-        vae: AutoencoderKL,
+        vae: Union[AutoencoderTiny, AutoencoderKL],
         unet: UNet3DConditionModel,
         scheduler: Union[
             DDIMScheduler,
@@ -207,7 +207,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         )
 
         # encode the mask image into latents space so we can concatenate it to the latents
-        masked_image_latents = self.vae.encode(masked_image).latents
+        masked_image_latents = self.get_vae_latents(masked_image)
         masked_image_latents = (masked_image_latents - self.vae.config.shift_factor) * self.vae.config.scaling_factor
 
         # aligning device to prevent device errors when concating it with the latent model input
@@ -222,12 +222,20 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
             torch.cat([masked_image_latents] * 2) if context.do_classifier_free_guidance else masked_image_latents
         )
         return mask, masked_image_latents
+    
+    def get_vae_latents(self, images):
+        if isinstance(self.vae, AutoencoderTiny):
+            return self.vae.encode(images).latents
+        elif isinstance(self.vae, AutoencoderKL):
+            return self.vae.encode(images).latent_dist.sample(generator=self.lipsync_context.generator)
+        else:
+            raise ValueError(f"Unsupported VAE type: {type(self.vae)}")
 
     # @Timer()
     def prepare_image_latents(self, context: LipsyncContext, images: torch.Tensor):
         """Prepare image latent variables"""
         images = images.to(device=context.device, dtype=context.weight_dtype)
-        image_latents = self.vae.encode(images).latents
+        image_latents = self.get_vae_latents(images)
         image_latents = (image_latents - self.vae.config.shift_factor) * self.vae.config.scaling_factor
         image_latents = rearrange(image_latents, "f c h w -> 1 c f h w")
         image_latents = torch.cat([image_latents] * 2) if context.do_classifier_free_guidance else image_latents
@@ -303,7 +311,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
     def face_processor(self):
         return FaceProcessor(resolution=self.lipsync_context.resolution, device=self.lipsync_context.device)
 
-    # @Timer()
+    @Timer()
     def _denoising_step(self, latents, t, audio_embeds, mask_latents, masked_image_latents, image_latents, context: LipsyncContext):
         """Execute a single denoising step"""
         # Prepare model input
@@ -438,6 +446,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
         command = f"ffmpeg -y -loglevel error -nostdin -i {os.path.join(temp_dir, 'video.mp4')} -i {os.path.join(temp_dir, 'audio.wav')} -c:v libx264 -c:a aac -q:v 0 -q:a 0 {video_out_path}"
         subprocess.run(command, shell=True)
+
 
         return video_out_path
     
