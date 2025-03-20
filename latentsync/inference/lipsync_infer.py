@@ -1,11 +1,12 @@
 from latentsync.inference.context import LipsyncContext
 from latentsync.inference.lipsync_model import LipsyncModel
-from latentsync.inference.multi_infer import MultiThreadInference
+from latentsync.inference.multi_infer import MultiProcessInference, MultiThreadInference
 from latentsync.pipelines.metadata import LipsyncMetadata
 import torch
 from typing import List
 
 from latentsync.utils.affine_transform import AlignRestore
+from latentsync.utils.timer import Timer
 
 
 class LipsyncInference(MultiThreadInference):
@@ -24,6 +25,7 @@ class LipsyncInference(MultiThreadInference):
         self.result_start_idx = 0
         super().worker()
 
+    @Timer("lipsync_diffusion")
     def process_task(self, model: LipsyncModel, idx, data: LipsyncMetadata):
         data_buffer = self.data_buffer
         if len(data_buffer) == 0:

@@ -1,20 +1,18 @@
-
-stream inference
-* audio2feat
-* faster whipser stream inference
-* face_preprocess
-* face_postprocess
-* restore_img faster in affine_transform.py
-* may use [kornia](https://kornia.readthedocs.io/en/latest/geometry.transform.html#kornia.geometry.transform.warp_affine)
-
+* parallel and stream inference
+* stable audio2feat stream inference, use overlapping window
+* face_preprocess speed up, use onnxruntime-gpu
+* faster restore_img, 
+* restore_img faster by wrapAffine in GPU
 * 排查每一步数据是否在GPU上
-
 * docker https://hub.docker.com/r/pytorch/pytorch/tags
 
 * 串行 14.7 fps
 * 并行 17.2 fps
 
 * 大分辨率图像的 restore_img 优化，ROI 策略，提前计算出仿射变换影响区域，只将需要的部分放入GPU进行计算
+
+* latentsync 1.5, new model
+* 优化没有识别到人脸情况下的输出，直接输出原始图片
 
 # speed test
 * ori var and unet
