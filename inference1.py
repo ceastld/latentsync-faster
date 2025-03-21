@@ -81,7 +81,7 @@ if __name__ == "__main__":
     print(f"使用{model_type}模型进行推理...")
 
     Timer.enable()
-    demo = GLOBAL_CONFIG.inference.demo1
+    demo = GLOBAL_CONFIG.inference.obama
     run_inference(demo.video_path, demo.audio_path, demo.video_out_path, use_onnx=args.onnx, use_trt=args.trt)
     Timer.summary()
     print(f"输出视频保存到: {demo.video_out_path}")

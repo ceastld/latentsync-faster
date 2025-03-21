@@ -57,14 +57,9 @@ class FaceProcessor:
         )
 
         box = [0, 0, face.shape[1], face.shape[0]]  # x1, y1, x2, y2
-
-        # Step 4: Resize image
-
-        face = cv2.resize(face, (self.resolution, self.resolution), interpolation=cv2.INTER_LANCZOS4)
-        face = rearrange(torch.from_numpy(face), "h w c -> c h w")
-
+        face = torch.from_numpy(face)
         return face, box, affine_matrix
-    
+
     @Timer()
     @torch.no_grad()
     def prepare_face(self, frame: np.ndarray) -> LipsyncMetadata:
@@ -113,7 +108,7 @@ class FaceProcessor:
 
 def test_face_processor():
     face_processor = FaceProcessor(resolution=256, device="cuda")
-    reader = VideoReader(GLOBAL_CONFIG.inference.default_video_path)
+    reader = VideoReader(GLOBAL_CONFIG.inference.demo1.video_path)
     for frame in tqdm(reader, desc="Processing frames", total=reader.total_frames):
         face_processor.prepare_face(frame)
 
@@ -132,5 +127,3 @@ if __name__ == "__main__":
     Timer.enable()
     test_face_processor()
     Timer.summary()
-
-
