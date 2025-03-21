@@ -7,7 +7,7 @@ from tqdm import tqdm
 from latentsync.configs.config import GLOBAL_CONFIG
 from latentsync.inference.lipsync_infer import LipsyncInference, LipsyncRestore
 from latentsync.inference.audio_infer import AudioInference
-from latentsync.inference.context import LipsyncContext
+from latentsync.inference.context import LipsyncContext, LipsyncContext_v15
 from latentsync.inference.face_infer import FaceInference
 from latentsync.inference.multi_infer import MultiThreadInference
 from latentsync.inference.utils import load_audio_clips
@@ -126,7 +126,7 @@ async def auto_push_data(video_path, audio_path, model: LatentSyncInference, max
     for i, frame in enumerate(cycle_video_stream(video_path, max_frames)):
         model.push_frame(frame)
         model.push_audio(audio_clips[i % len(audio_clips)])
-        await asyncio.sleep(1 / 30)
+        await asyncio.sleep(1 / 100)
     model.add_end_task()
 
 
@@ -141,8 +141,11 @@ async def wait_for_results(model: LatentSyncInference, total: int = None):
 
 
 async def main():
-    MAX_FRAMES = 400
+    MAX_FRAMES = 1000
     context = LipsyncContext()
+    # context.num_frames = 40
+    # context.audio_batch_size = 40
+
     model = LatentSyncInference(context)
     model.wait_loaded()
     model.start_processing()
@@ -159,3 +162,4 @@ if __name__ == "__main__":
     # Timer.enable()
     asyncio.run(main())
     Timer.summary()
+
