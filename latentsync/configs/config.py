@@ -88,7 +88,7 @@ class LipsyncConfig:
     width = 256
 
     # Diffusion parameters
-    num_inference_steps = 3
+    num_inference_steps = 2
     guidance_scale = 1.5
     weight_dtype = get_dtype()
     eta = 0.0

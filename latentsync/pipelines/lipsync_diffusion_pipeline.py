@@ -196,7 +196,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         latents = latents * self.scheduler.init_noise_sigma
         return latents
 
-    # @Timer()
+    @Timer()
     def prepare_mask_latents(self, context: LipsyncContext, mask: torch.Tensor, masked_image: torch.Tensor):
         """Prepare mask latent variables"""
         # resize the mask to latents shape as we concatenate the mask to the latents
@@ -208,10 +208,6 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
         # encode the mask image into latents space so we can concatenate it to the latents
         masked_image_latents = self.get_vae_latents(masked_image)
-        masked_image_latents = (masked_image_latents - self.vae.config.shift_factor) * self.vae.config.scaling_factor
-
-        # aligning device to prevent device errors when concating it with the latent model input
-        # masked_image_latents = masked_image_latents.to(device=context.device, dtype=context.weight_dtype)
 
         # assume batch size = 1
         mask = rearrange(mask, "f c h w -> 1 c f h w")
@@ -223,11 +219,14 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         )
         return mask, masked_image_latents
     
+    @Timer()
     def get_vae_latents(self, images):
         if isinstance(self.lipsync_context, LipsyncContext_v15):
-            return self.vae.encode(images).latent_dist.sample(generator=self.lipsync_context.generator)
+            masked_image_latents = self.vae.encode(images).latent_dist.sample(generator=self.lipsync_context.generator)
+            masked_image_latents = (masked_image_latents - self.vae.config.shift_factor) * self.vae.config.scaling_factor
+            return masked_image_latents # AutoencoderKL
         elif isinstance(self.lipsync_context, LipsyncContext):
-            return self.vae.encode(images).latents
+            return self.vae.encode(images).latents # AutoencoderTiny
         else:
             raise ValueError(f"Unsupported VAE type: {type(self.vae)}")
 
@@ -236,19 +235,9 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         """Prepare image latent variables"""
         images = images.to(device=context.device, dtype=context.weight_dtype)
         image_latents = self.get_vae_latents(images)
-        image_latents = (image_latents - self.vae.config.shift_factor) * self.vae.config.scaling_factor
         image_latents = rearrange(image_latents, "f c h w -> 1 c f h w")
         image_latents = torch.cat([image_latents] * 2) if context.do_classifier_free_guidance else image_latents
-
         return image_latents
-
-    # @Timer()
-    def paste_surrounding_pixels_back(self, decoded_latents, pixel_values, masks):
-        # Paste the surrounding pixels back, because we only want to change the mouth region
-        # pixel_values = pixel_values.to(device=device, dtype=weight_dtype)
-        # masks = masks.to(device=device, dtype=weight_dtype)
-        combined_pixel_values = decoded_latents * masks + pixel_values * (1 - masks)
-        return combined_pixel_values
 
     @staticmethod
     def pixel_values_to_images(pixel_values: torch.Tensor):
@@ -342,6 +331,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         
         # 1. Prepare latent variables
         num_frames = len(faces)
+        faces = faces.to(context.device)
         latents = self.prepare_latents(context, num_frames)
 
         # 2. Set timesteps
@@ -359,10 +349,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
             audio_embeds = None
 
         # 4. Prepare face masks
-        pixel_values, masked_pixel_values, masks = self.image_processor.prepare_masks_and_masked_images(
-            faces
-        )
-
+        pixel_values, masked_pixel_values, masks = self.image_processor.prepare_masks_and_masked_images(faces)
         pixel_values = pixel_values.to(context.device, dtype=context.weight_dtype)
         masked_pixel_values = masked_pixel_values.to(context.device, dtype=context.weight_dtype)
         masks = masks.to(context.device, dtype=context.weight_dtype)

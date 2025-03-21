@@ -134,7 +134,7 @@ async def wait_for_results(model: LatentSyncInference, total: int = None):
     pbar = tqdm(desc="results", total=total)
     output_frames = []
     async for data in model.wait_for_results():
-        # output_frames.append(data)
+        output_frames.append(data)
         pbar.update(1)
     pbar.close()
     return output_frames
@@ -143,9 +143,8 @@ async def wait_for_results(model: LatentSyncInference, total: int = None):
 async def main():
     MAX_FRAMES = 1000
     context = LipsyncContext()
-    # context.num_frames = 40
-    # context.audio_batch_size = 40
-
+    # context.num_frames = 8
+    context.num_inference_steps = 2
     model = LatentSyncInference(context)
     model.wait_loaded()
     model.start_processing()
@@ -153,8 +152,8 @@ async def main():
     audio_path = infer_package.audio_path
     asyncio.create_task(auto_push_data(infer_package.video_path, audio_path, model, MAX_FRAMES))
     results = await wait_for_results(model, MAX_FRAMES)
-    # save_frames_to_video(results, infer_package.video_out_path, audio_path=audio_path)
-    # print(f"Saved to {infer_package.video_out_path}")
+    save_frames_to_video(results, infer_package.video_out_path, audio_path=audio_path)
+    print(f"Saved to {infer_package.video_out_path}")
     model.stop_workers()
 
 
