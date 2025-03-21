@@ -128,8 +128,12 @@ class LipsyncContext:
 
     def create_scheduler(self) -> DPMSolverMultistepScheduler:
         """Create diffusion scheduler"""
+        self.num_inference_steps = 2
         return DPMSolverMultistepScheduler.from_pretrained(
-            GLOBAL_CONFIG.config_dir, algorithm_type="dpmsolver++", solver_order=1
+            GLOBAL_CONFIG.config_dir,
+            algorithm_type="dpmsolver++",
+            solver_order=2,
+            # use_karras_sigmas=True,
         )
 
     @classmethod
@@ -143,7 +147,7 @@ class LipsyncContext_v15(LipsyncContext):
         super().__post_init__()
         self.num_frames: int = 16
 
-    def create_vae(self) -> AutoencoderTiny:
+    def create_vae(self) -> AutoencoderKL:
         """Create VAE model for encoding/decoding images"""
         vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", torch_dtype=self.weight_dtype)
         vae.config.scaling_factor = 0.18215

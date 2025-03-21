@@ -27,7 +27,11 @@ class LipsyncModel:
 
     @torch.no_grad()
     def run_diffusion(self, faces: torch.Tensor, audio_features: Optional[List[torch.Tensor]]) -> torch.Tensor:
-        synced_faces_batch, _ = self.pipeline._run_diffusion_batch(faces, audio_features, self.context)
+        synced_faces_batch, _ = self.pipeline._run_diffusion_batch(
+            faces,
+            audio_features,
+            self.context,
+        )
         return synced_faces_batch
 
     @Timer()
@@ -47,19 +51,16 @@ class LipsyncModel:
 
         return metadata_list
 
-        # output_frames = [
-        #     self.restorer.restore_img(metadata.original_frame, metadata.sync_face, metadata.affine_matrix)
-        #     for metadata in metadata_list
-        # ]
-        # return output_frames
-
     @Timer()
     @torch.no_grad()
     def restore_batch(self, metadata_list: List[LipsyncMetadata]):
-        return [
-            self.restorer.restore_img(metadata.original_frame, metadata.sync_face, metadata.affine_matrix)
-            for metadata in metadata_list
-        ]
+        output_frames = []
+        for metadata in metadata_list:
+            result = metadata.original_frame
+            if metadata.sync_face is not None:
+                result = self.restorer.restore_img(metadata.original_frame, metadata.sync_face, metadata.affine_matrix)
+            output_frames.append(result)
+        return output_frames
 
     @property
     def face_processor(self):

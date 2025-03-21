@@ -39,30 +39,35 @@ class ImageProcessor:
             self.mask_image = load_fixed_mask(resolution)
         else:
             self.mask_image = mask_image
-
+        self.mask_image = self.mask_image.to(device)
         self.device = device
 
     def preprocess_image(self, image: torch.Tensor):
+        # Handle both single image and batch images
+        is_batch = len(image.shape) == 4
+        if not is_batch:
+            image = image.unsqueeze(0)
+
+        # Process images
         image = self.resize(image)
         pixel_values = self.normalize(image / 255.0)
         masked_pixel_values = pixel_values * self.mask_image
-        return pixel_values, masked_pixel_values, self.mask_image[0:1]
 
-    # @Timer()
+        # Expand mask for batch processing if needed
+        mask = self.mask_image[0:1]
+        if is_batch:
+            mask = mask.expand(image.shape[0], -1, -1, -1)
+
+        if not is_batch:
+            return pixel_values.squeeze(0), masked_pixel_values.squeeze(0), mask.squeeze(0)
+        return pixel_values, masked_pixel_values, mask
+
     def prepare_masks_and_masked_images(self, images: Union[torch.Tensor, np.ndarray]):
         if isinstance(images, np.ndarray):
             images = torch.from_numpy(images)
         if images.shape[3] == 3:
             images = rearrange(images, "b h w c -> b c h w")
-
-        results = [self.preprocess_image(image) for image in images]
-
-        pixel_values_list, masked_pixel_values_list, masks_list = list(zip(*results))
-        return (
-            torch.stack(pixel_values_list),
-            torch.stack(masked_pixel_values_list),
-            torch.stack(masks_list),
-        )
+        return self.preprocess_image(images)
 
     def process_images(self, images: Union[torch.Tensor, np.ndarray]):
         if isinstance(images, np.ndarray):
