@@ -9,7 +9,7 @@ import torchvision.transforms.functional as TF
 from latentsync.utils.timer import Timer
 
 
-def transformation_from_points(points1, points0, smooth=True, p_bias=None):
+def transformation_from_points(points1: np.ndarray, points0: np.ndarray, smooth=True, p_bias=None):
     points2 = np.array(points0)
     points2 = points2.astype(np.float64)
     points1 = points1.astype(np.float64)
@@ -135,7 +135,7 @@ class AlignRestore(object):
             
         return tensor.numpy()
 
-    def warp_affine_tensor(self, src_tensor, matrix, size):
+    def warp_affine_tensor(self, src_tensor: torch.Tensor, matrix: np.ndarray, size: tuple[int, int]):
         """用PyTorch实现仿射变换，行为与OpenCV的warpAffine一致
         
         参数:
@@ -293,9 +293,6 @@ class AlignRestore(object):
         elif border_mode == "reflect":
             border_mode = cv2.BORDER_REFLECT
 
-        # 应用仿射变换
-        
-        # img_t = img
         cropped_face = cv2.warpAffine(
             img,
             affine_matrix,
