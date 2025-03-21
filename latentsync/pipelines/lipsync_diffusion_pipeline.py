@@ -224,10 +224,10 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         return mask, masked_image_latents
     
     def get_vae_latents(self, images):
-        if isinstance(self.lipsync_context, LipsyncContext):
-            return self.vae.encode(images).latents
-        elif isinstance(self.lipsync_context, LipsyncContext_v15):
+        if isinstance(self.lipsync_context, LipsyncContext_v15):
             return self.vae.encode(images).latent_dist.sample(generator=self.lipsync_context.generator)
+        elif isinstance(self.lipsync_context, LipsyncContext):
+            return self.vae.encode(images).latents
         else:
             raise ValueError(f"Unsupported VAE type: {type(self.vae)}")
 
