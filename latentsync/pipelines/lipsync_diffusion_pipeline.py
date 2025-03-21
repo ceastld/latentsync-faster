@@ -1,6 +1,6 @@
 from __future__ import annotations
 from functools import cached_property
-from latentsync.inference.context import LipsyncContext
+from latentsync.inference.context import LipsyncContext, LipsyncContext_v15
 from latentsync.models.unet import UNet3DConditionModel
 from latentsync.pipelines.metadata import LipsyncMetadata
 from latentsync.utils.face_processor import FaceProcessor
@@ -100,8 +100,8 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         self.scheduler = scheduler # for code compilation
         self.lipsync_context = lipsync_context
 
+        vae = torch.compile(vae, mode="reduce-overhead", fullgraph=True)
         if lipsync_context.use_compile:
-            vae = torch.compile(vae, mode="reduce-overhead", fullgraph=True)
             unet = torch.compile(unet, mode="reduce-overhead", fullgraph=True)
 
         self.register_modules(
@@ -224,9 +224,9 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
         return mask, masked_image_latents
     
     def get_vae_latents(self, images):
-        if isinstance(self.vae, AutoencoderTiny):
+        if isinstance(self.lipsync_context, LipsyncContext):
             return self.vae.encode(images).latents
-        elif isinstance(self.vae, AutoencoderKL):
+        elif isinstance(self.lipsync_context, LipsyncContext_v15):
             return self.vae.encode(images).latent_dist.sample(generator=self.lipsync_context.generator)
         else:
             raise ValueError(f"Unsupported VAE type: {type(self.vae)}")
