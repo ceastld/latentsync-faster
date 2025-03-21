@@ -82,13 +82,13 @@ class FaceLandmarkDetector:
 
         # 预处理图像
         # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        with Timer("resize in detect_face_onnx"):
-            image = cv2.resize(image, (320, 240))
-        with Timer("normalize in detect_face_onnx"):
-            image = torch.from_numpy(image).to(self.device)
-            img_mean = torch.tensor([127, 127, 127], device=self.device).view(1, 1, 3)
-            image: torch.Tensor = (image - img_mean) / 128
-            image = image.permute(2, 0, 1).unsqueeze(0).cpu().numpy()
+        # with Timer("resize in detect_face_onnx"):
+        image = cv2.resize(image, (320, 240))
+        # with Timer("normalize in detect_face_onnx"):
+        image = torch.from_numpy(image).to(self.device)
+        img_mean = torch.tensor([127, 127, 127], device=self.device).view(1, 1, 3)
+        image: torch.Tensor = (image - img_mean) / 128
+        image = image.permute(2, 0, 1).unsqueeze(0).cpu().numpy()
 
         confidences, boxes = self.face_detector.run(None, {self.face_detector_input_name: image})
 
