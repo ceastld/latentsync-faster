@@ -79,17 +79,21 @@ class LatentSyncInference:
         self.create_task(self.push_data_to_lipsync_restore())
 
     async def process_face(self):
-        pbar = tqdm(desc="Processing face")
+        pbar = None
         async for data in self.face_model.result_stream():
             await self.metadata_queue.put(data)
+            if pbar is None:
+                pbar = tqdm(desc="Processing face")
             pbar.update(1)
         self.metadata_queue.put_nowait(None)
         pbar.close()
 
     async def process_audio(self):
-        pbar = tqdm(desc="Processing audio")
+        pbar = None
         async for data in self.audio_model.result_stream():
             await self.audio_feature_queue.put(data)
+            if pbar is None:
+                pbar = tqdm(desc="Processing audio")
             pbar.update(1)
         self.audio_feature_queue.put_nowait(None)
         pbar.close()
@@ -105,9 +109,11 @@ class LatentSyncInference:
             self.lipsync_model.push_data(metadata)
 
     async def push_data_to_lipsync_restore(self):
-        pbar = tqdm(desc="Pushing data to lipsync restore")
+        pbar = None
         async for metadata in self.lipsync_model.result_stream():
             self.lipsync_restore.push_data(metadata)
+            if pbar is None:
+                pbar = tqdm(desc="Pushing data to lipsync restore")
             pbar.update(1)
         self.lipsync_restore.add_end_task()
         pbar.close()
@@ -131,10 +137,12 @@ async def auto_push_data(video_path, audio_path, model: LatentSyncInference, max
 
 
 async def wait_for_results(model: LatentSyncInference, total: int = None):
-    pbar = tqdm(desc="results", total=total)
+    pbar = None
     output_frames = []
     async for data in model.wait_for_results():
         output_frames.append(data)
+        if pbar is None:
+            pbar = tqdm(desc="results", total=total)
         pbar.update(1)
     pbar.close()
     return output_frames
