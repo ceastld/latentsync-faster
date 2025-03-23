@@ -1,7 +1,7 @@
 from typing import List
 from latentsync.configs.config import GLOBAL_CONFIG
 from latentsync.inference.audio_infer import AudioProcessor
-from latentsync.inference.context import LipsyncContext
+from latentsync.inference.context import LipsyncContext, LipsyncContext_v15
 from latentsync.inference.lipsync_model import LipsyncModel
 from tqdm import tqdm
 from latentsync.inference.utils import load_audio_clips

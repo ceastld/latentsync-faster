@@ -7,7 +7,7 @@ from tqdm import tqdm
 from latentsync.configs.config import GLOBAL_CONFIG
 from latentsync.inference.lipsync_infer import LipsyncInference, LipsyncRestore
 from latentsync.inference.audio_infer import AudioInference
-from latentsync.inference.context import LipsyncContext
+from latentsync.inference.context import LipsyncContext, LipsyncContext_v15
 from latentsync.inference.face_infer import FaceInference
 from latentsync.inference.multi_infer import MultiThreadInference
 from latentsync.inference.utils import load_audio_clips
@@ -132,7 +132,7 @@ async def auto_push_data(video_path, audio_path, model: LatentSyncInference, max
     for i, frame in enumerate(cycle_video_stream(video_path, max_frames)):
         model.push_frame(frame)
         model.push_audio(audio_clips[i % len(audio_clips)])
-        await asyncio.sleep(1 / 30)
+        await asyncio.sleep(1 / 100)
     model.add_end_task()
 
 
@@ -148,8 +148,8 @@ async def wait_for_results(model: LatentSyncInference, total: int = None):
     return output_frames
 
 
-async def main():
-    MAX_FRAMES = 400
+async def main(save: bool = False):
+    MAX_FRAMES = 1000
     context = LipsyncContext()
     # context.num_frames = 8
     context.num_inference_steps = 2
@@ -159,13 +159,19 @@ async def main():
     infer_package = GLOBAL_CONFIG.inference.obama
     audio_path = infer_package.audio_path
     asyncio.create_task(auto_push_data(infer_package.video_path, audio_path, model, MAX_FRAMES))
-    results = await wait_for_results(model, MAX_FRAMES)
-    save_frames_to_video(results, infer_package.video_out_path, audio_path=audio_path)
-    print(f"Saved to {infer_package.video_out_path}")
+    results = await wait_for_results(model, MAX_FRAMES, save)
+    if save:
+        save_frames_to_video(results, infer_package.video_out_path, audio_path=audio_path)
+        print(f"Saved to {infer_package.video_out_path}")
     model.stop_workers()
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--save", action="store_true", help="保存结果")
+    args = parser.parse_args()
+    
     # Timer.enable()
-    asyncio.run(main())
+    asyncio.run(main(args.save))
     Timer.summary()
+
