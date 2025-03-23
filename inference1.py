@@ -14,8 +14,7 @@ import argparse
 
 def run_inference(video_path: str, audio_path: str, output_path: str, use_onnx: bool = False, use_trt: bool = False):
     # Initialize model and context
-    context = LipsyncContext(use_compile=False, use_onnx=use_onnx, use_trt=use_trt)
-    context.num_frames = 8
+    context = LipsyncContext_v15(use_compile=False, use_onnx=use_onnx, use_trt=use_trt)
     
     lipsync_model = LipsyncModel(context)
 

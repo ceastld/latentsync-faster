@@ -145,7 +145,7 @@ class LipsyncContext:
 class LipsyncContext_v15(LipsyncContext):
     def __post_init__(self):
         super().__post_init__()
-        self.num_frames: int = 16
+        self.num_frames: int = 24
 
     def create_vae(self) -> AutoencoderKL:
         """Create VAE model for encoding/decoding images"""

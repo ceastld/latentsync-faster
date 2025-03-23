@@ -127,7 +127,7 @@ async def auto_push_data(video_path, audio_path, model: LatentSyncInference, max
     for i, frame in enumerate(cycle_video_stream(video_path, max_frames)):
         model.push_frame(frame)
         model.push_audio(audio_clips[i % len(audio_clips)])
-        await asyncio.sleep(1 / 100)
+        await asyncio.sleep(1 / 30)
     model.add_end_task()
 
 
@@ -144,9 +144,10 @@ async def wait_for_results(model: LatentSyncInference, total: int = None, save: 
 
 async def main(save: bool = False):
     MAX_FRAMES = 1000
-    context = LipsyncContext()
-    # context.num_frames = 8
-    context.num_inference_steps = 2
+    context = LipsyncContext_v15()
+    context.num_frames = 24
+    # context.audio_batch_size = 24
+
     model = LatentSyncInference(context)
     model.wait_loaded()
     model.start_processing()
