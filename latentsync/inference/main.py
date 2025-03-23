@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 from functools import cached_property
 from typing import Set
@@ -130,11 +131,12 @@ async def auto_push_data(video_path, audio_path, model: LatentSyncInference, max
     model.add_end_task()
 
 
-async def wait_for_results(model: LatentSyncInference, total: int = None):
+async def wait_for_results(model: LatentSyncInference, total: int = None, save: bool = False):
     pbar = tqdm(desc="results", total=total)
     output_frames = []
     async for data in model.wait_for_results():
-        output_frames.append(data)
+        if save:
+            output_frames.append(data)
         pbar.update(1)
     pbar.close()
     return output_frames
