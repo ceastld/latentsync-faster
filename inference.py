@@ -1,11 +1,5 @@
 import argparse
-import warnings
-from latentsync.configs.config import GLOBAL_CONFIG
-from latentsync.inference.context import LipsyncContext_v15, LipsyncContext
-from latentsync.inference.utils import create_pipeline
-from latentsync.inference.utils import set_seed
-from latentsync.utils.timer import Timer
-
+from latentsync import *
 
 def main(args):
     print(f"Input video path: {args.video_path}")
@@ -13,9 +7,6 @@ def main(args):
 
     context = LipsyncContext_v15() if args.v15 else LipsyncContext()
     pipeline = create_pipeline(context)
-
-    set_seed(args.seed)
-
     pipeline(
         video_path=args.video_path,
         audio_path=args.audio_path,

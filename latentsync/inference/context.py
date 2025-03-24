@@ -6,6 +6,7 @@ from functools import cached_property
 from omegaconf import OmegaConf
 from diffusers import AutoencoderTiny, AutoencoderKL, DPMSolverMultistepScheduler
 from diffusers.utils.import_utils import is_xformers_available
+from latentsync.inference.utils import set_seed
 from latentsync.models.unet import UNet3DConditionModel
 from latentsync.whisper.audio2feature import Audio2Feature
 from latentsync.models_v15.unet import UNet3DConditionModel as UNet3DConditionModel_v15
@@ -42,6 +43,7 @@ class LipsyncContext:
         use_compile: bool = False,
         use_onnx: bool = False,
         use_trt: bool = False,
+        seed: int = None,
     ):
         config = self.config
         # Basic parameters
@@ -76,7 +78,7 @@ class LipsyncContext:
         self.use_compile = use_compile
         self.use_onnx = use_onnx
         self.use_trt = use_trt
-
+        self.seed = seed or config.seed
         # Post initialization
         self._post_init()
 
@@ -91,6 +93,9 @@ class LipsyncContext:
         # Ensure only one model type is selected
         if sum([self.use_compile, self.use_onnx, self.use_trt]) > 1:
             raise ValueError("Only one of use_compile, use_onnx, or use_trt can be True at the same time")
+        
+        if self.seed is not None:
+            set_seed(self.seed)
 
     def create_audio_encoder(self) -> Audio2Feature:
         """Create audio encoder for processing audio samples"""

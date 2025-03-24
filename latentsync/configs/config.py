@@ -92,7 +92,7 @@ class LipsyncConfig:
     guidance_scale = 1.5
     weight_dtype = get_dtype()
     eta = 0.0
-
+    seed = 1247
 
 class LipsyncConfig_v15(LipsyncConfig):
     num_frames = 16
