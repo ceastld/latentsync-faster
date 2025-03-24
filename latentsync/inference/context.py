@@ -140,6 +140,13 @@ class LipsyncContext:
     def from_dict(cls, config_dict: dict) -> "LipsyncContext":
         """Create context from dictionary"""
         return cls(**config_dict)
+    
+    @staticmethod
+    def from_version(version: str, **kwargs) -> "LipsyncContext":
+        if version == "v15":
+            return LipsyncContext_v15(**kwargs)
+        else:
+            return LipsyncContext(**kwargs)
 
 
 class LipsyncContext_v15(LipsyncContext):

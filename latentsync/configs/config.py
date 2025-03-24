@@ -123,6 +123,14 @@ class InferenceConfig:
         )
 
     @cached_property
+    def obama_top(self):
+        return InferPackage(
+            video_path=os.path.join(ASSETS_DIR, "obama_top.mp4"),
+            audio_path=os.path.join(ASSETS_DIR, "cxk.mp3"),
+            video_out_path=os.path.join(OUTPUT_DIR, "obama_cxk_top.mp4"),
+        )
+
+    @cached_property
     def obama1(self):
         return InferPackage(
             video_path=os.path.join(ASSETS_DIR, "obama1.mp4"),

@@ -14,9 +14,11 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+
 def print_pt(path):
     data = torch.load(path)
     recursive_print(data)
+
 
 def recursive_print(d, indent=0):
     # 遍历字典的键值对
@@ -56,7 +58,10 @@ def combine_video_and_audio(video_file, audio_file, output, quality=17, copy_aud
 
 
 def convert_video(video_file, output, quality=17):
-    cmd = f"ffmpeg -i {video_file} -c:v libx264 -crf {quality} -pix_fmt yuv420p " f"-fflags +shortest -y -hide_banner -loglevel error {output}"
+    cmd = (
+        f"ffmpeg -i {video_file} -c:v libx264 -crf {quality} -pix_fmt yuv420p "
+        f"-fflags +shortest -y -hide_banner -loglevel error {output}"
+    )
     assert subprocess.run(shlex.split(cmd)).returncode == 0
 
 
@@ -100,8 +105,11 @@ def video_stream(video_path):
         yield cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     cap.release()
 
-def cycle_video_stream(video_path, max_frames):
+
+def cycle_video_stream(video_path, max_frames=None):
     cap = cv2.VideoCapture(video_path)
+    if max_frames is None:
+        max_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
     idx = 0
     while cap.isOpened():
         ret, frame = cap.read()
@@ -129,6 +137,7 @@ def data_to_device(data, device: Union[str, torch.device]) -> Any:
     else:
         return data
 
+
 def data_to_numpy(data) -> Any:
     if isinstance(data, torch.Tensor):
         return data.cpu().numpy()
@@ -142,6 +151,7 @@ def data_to_numpy(data) -> Any:
         return data
     else:
         return data
+
 
 class LazyVideoWriter:
     def __init__(self, save_path, fps=25.0, save_images=False):
@@ -237,8 +247,10 @@ def image_to_tensor(image):
         image = image.permute(2, 0, 1)
     return image.float()
 
+
 class AsyncTaskManager:
     logger = logging.getLogger("AsyncTaskManager")
+
     def __init__(self):
         self.tasks: Set[asyncio.Task] = set()
         self.loop = asyncio.get_event_loop()

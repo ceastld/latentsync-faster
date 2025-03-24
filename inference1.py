@@ -56,8 +56,6 @@ def run_inference(video_path: str, audio_path: str, output_path: str, use_onnx: 
             metadata_list=batch_metadata,
             audio_features=batch_audio_features,
         )
-        # for data in output_metadata:
-        #     processed_frames.append(data.restore_face())
         output_frames = lipsync_model.restore_batch(output_metadata)
         processed_frames.extend(output_frames)
         frame_idx += len(frames_batch)
@@ -80,7 +78,7 @@ if __name__ == "__main__":
     print(f"使用{model_type}模型进行推理...")
 
     Timer.enable()
-    demo = GLOBAL_CONFIG.inference.obama
+    demo = GLOBAL_CONFIG.inference.obama_top
     run_inference(demo.video_path, demo.audio_path, demo.video_out_path, use_onnx=args.onnx, use_trt=args.trt)
     Timer.summary()
     print(f"输出视频保存到: {demo.video_out_path}")

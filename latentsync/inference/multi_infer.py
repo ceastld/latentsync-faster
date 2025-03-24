@@ -445,26 +445,6 @@ class MultiProcessInference(InferenceWorker):
         return [self.results[key] for key in sorted(self.results.keys())]
 
 
-class AsyncWorker(InferenceWorker):
-    def __init__(self, worker_timeout=60):
-        super().__init__(worker_timeout)
-        self.task = None
-
-    def start_workers(self):
-        async def async_worker():
-            return await asyncio.to_thread(self.worker)
-
-        self.task = asyncio.create_task(async_worker())
-
-    def stop_workers(self):
-        if self.task is not None:
-            self.task.cancel()
-            self.task = None
-
-    def is_alive(self):
-        return self.task is not None and not self.task.done()
-
-
 class CustomInference(MultiProcessInference):
     def infer_task(self, model, input_data):
         """
