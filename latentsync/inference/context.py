@@ -1,3 +1,4 @@
+from accelerate.utils import set_seed as acc_seed
 from latentsync.configs.config import GLOBAL_CONFIG, LipsyncConfig
 import torch
 from dataclasses import dataclass
@@ -6,10 +7,17 @@ from functools import cached_property
 from omegaconf import OmegaConf
 from diffusers import AutoencoderTiny, AutoencoderKL, DPMSolverMultistepScheduler
 from diffusers.utils.import_utils import is_xformers_available
-from latentsync.inference.utils import set_seed
 from latentsync.models.unet import UNet3DConditionModel
 from latentsync.whisper.audio2feature import Audio2Feature
 from latentsync.models_v15.unet import UNet3DConditionModel as UNet3DConditionModel_v15
+
+
+def set_seed(seed: int):
+    if seed != -1:
+        acc_seed(seed)
+    else:
+        torch.seed()
+        print(f"Initial seed: {torch.initial_seed()}")
 
 
 class LipsyncContext:

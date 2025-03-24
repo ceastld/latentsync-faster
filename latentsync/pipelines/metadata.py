@@ -16,6 +16,13 @@ class LipsyncMetadata:
     sync_face: np.ndarray = None
     audio_feature: np.ndarray = None
 
+    @property
+    def face_tensor(self):
+        assert self.face is not None
+        if isinstance(self.face, torch.Tensor):
+            return self.face
+        return torch.from_numpy(self.face)
+
     @torch.no_grad()
     def set_sync_face(self, face: torch.Tensor):
         # face = face.detach() # [280, 210, 3]

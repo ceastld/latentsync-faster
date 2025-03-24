@@ -1,5 +1,4 @@
 from typing import List
-from accelerate.utils import set_seed as acc_seed
 import numpy as np
 import torch
 from latentsync.inference.context import LipsyncContext
@@ -41,14 +40,6 @@ def create_pipeline(context: LipsyncContext) -> LipsyncPipeline:
         scheduler=context.create_scheduler(),
         lipsync_context=context,
     ).to(context.device)
-
-
-def set_seed(seed: int):
-    if seed != -1:
-        acc_seed(seed)
-    else:
-        torch.seed()
-        print(f"Initial seed: {torch.initial_seed()}")
 
 
 def load_audio_clips(audio_path: str, samples_per_frame: int):

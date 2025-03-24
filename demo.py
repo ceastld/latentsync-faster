@@ -3,7 +3,7 @@ import gradio as gr
 import numpy as np
 import soundfile as sf
 from latentsync.inference.context import LipsyncContext
-from latentsync.inference.utils import create_pipeline, set_seed
+from latentsync.inference.utils import create_pipeline
 
 # Initialize the lip sync context and pipeline
 context = LipsyncContext()
@@ -31,9 +31,6 @@ def process_video(video_path, audio_input, seed=1247):
     video_name = os.path.splitext(os.path.basename(video_path))[0]
     audio_name = "input_audio"  # Use a fixed name since we're handling numpy array
     output_path = f"output/{video_name}_{audio_name}_synced.mp4"
-    
-    # Set random seed
-    set_seed(seed)
     
     try:
         # Run the pipeline

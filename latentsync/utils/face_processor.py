@@ -57,7 +57,7 @@ class FaceProcessor:
         )
 
         box = [0, 0, face.shape[1], face.shape[0]]  # x1, y1, x2, y2
-        face = torch.from_numpy(face)
+        # face = torch.from_numpy(face)
         return face, box, affine_matrix
 
     @Timer()

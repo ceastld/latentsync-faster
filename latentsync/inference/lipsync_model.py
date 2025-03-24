@@ -44,7 +44,7 @@ class LipsyncModel:
         metadata_list: List[LipsyncMetadata],
         audio_features: Optional[List[torch.Tensor]],
     ) -> List[LipsyncMetadata]:
-        faces = torch.stack([metadata.face for metadata in metadata_list])
+        faces = torch.stack([metadata.face_tensor for metadata in metadata_list])
         audio_features = align_audio_features(audio_features, len(faces))
 
         synced_faces_batch = self.run_diffusion(faces, audio_features)

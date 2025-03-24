@@ -8,7 +8,9 @@ __version__ = "0.1.0"
 
 from latentsync.inference.utils import create_pipeline
 from latentsync.inference.latentsync import LatentSync
+from latentsync.pipelines.metadata import LipsyncMetadata
 from latentsync.inference.lipsync_model import LipsyncModel
+from latentsync.utils.face_processor import FaceProcessor
 from latentsync.inference.audio_infer import AudioProcessor
 from latentsync.inference.context import LipsyncContext, LipsyncContext_v15
 from latentsync.configs.config import GLOBAL_CONFIG

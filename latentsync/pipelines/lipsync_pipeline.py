@@ -92,7 +92,7 @@ class LipsyncPipeline(LipsyncDiffusionPipeline):
                 print(f"Batch {batch_idx+1} No valid face detected, skipping")
                 return None
                 
-            faces = torch.stack([metadata.face for metadata in metadata_list]).to(self.device)
+            faces = torch.stack([metadata.face_tensor for metadata in metadata_list]).to(self.device)
         
         # 2. Prepare audio features for the current batch
         with Timer("prepare_audio_features"):
