@@ -45,3 +45,4 @@ wandb/
 !/assets/*
 *.egg-info/
 .gradio/
+test.py

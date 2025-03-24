@@ -1,3 +1,4 @@
+from typing import List
 from accelerate.utils import set_seed as acc_seed
 import numpy as np
 import torch
@@ -60,3 +61,16 @@ def load_audio_clips(audio_path: str, samples_per_frame: int):
     )
     audio_clips = audio_samples.reshape(-1, samples_per_frame)
     return audio_clips
+
+
+def align_audio_features(audio_features: List[torch.Tensor], num_faces: int) -> List[torch.Tensor]:
+    """Ensure audio features match the number of faces by padding or trimming."""
+    if len(audio_features) < num_faces:
+        # Pad with last feature if needed
+        last_feature = audio_features[-1] if audio_features else torch.zeros_like(audio_features[0])
+        audio_features.extend([last_feature] * (num_faces - len(audio_features)))
+    elif num_faces > 0:
+        # Trim extra features
+        audio_features = audio_features[:num_faces]
+
+    return audio_features

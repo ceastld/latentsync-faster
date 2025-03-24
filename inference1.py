@@ -12,10 +12,15 @@ from latentsync.utils.video import save_frames_to_video, VideoReader
 import argparse
 
 
-def run_inference(video_path: str, audio_path: str, output_path: str, use_onnx: bool = False, use_trt: bool = False):
+def run_inference(
+    video_path: str,
+    audio_path: str,
+    output_path: str,
+    **kwargs,
+):
     # Initialize model and context
-    context = LipsyncContext_v15(use_compile=False, use_onnx=use_onnx, use_trt=use_trt)
-    
+    context = LipsyncContext(**kwargs)
+
     lipsync_model = LipsyncModel(context)
 
     batch_size = context.num_frames
@@ -45,7 +50,7 @@ def run_inference(video_path: str, audio_path: str, output_path: str, use_onnx: 
 
     while frame_idx < total_frames:
         batch_metadata = []
-        frames_batch = video_reader.read_batch(batch_size)
+        frames_batch = video_reader.read_batch(min(batch_size, total_frames - frame_idx))
         batch_metadata = face_processor.prepare_face_batch(frames_batch)
         if not batch_metadata:
             break
@@ -73,12 +78,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="LatentSync 视频唇形同步")
     parser.add_argument("--onnx", action="store_true", help="使用ONNX模型加速")
     parser.add_argument("--trt", action="store_true", help="使用TensorRT模型加速")
+    parser.add_argument("--time", action="store_true", help="使用时间统计")
     args = parser.parse_args()
     model_type = "ONNX" if args.onnx else "TensorRT" if args.trt else "PyTorch"
     print(f"使用{model_type}模型进行推理...")
 
-    Timer.enable()
-    demo = GLOBAL_CONFIG.inference.obama_top
-    run_inference(demo.video_path, demo.audio_path, demo.video_out_path, use_onnx=args.onnx, use_trt=args.trt)
+    if args.time:
+        Timer.enable()
+    demo = GLOBAL_CONFIG.inference.obama
+    run_inference(
+        demo.video_path,
+        demo.audio_path,
+        demo.video_out_path,
+        use_onnx=args.onnx,
+        use_trt=args.trt,
+    )
     Timer.summary()
     print(f"输出视频保存到: {demo.video_out_path}")

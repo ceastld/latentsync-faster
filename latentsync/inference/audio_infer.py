@@ -1,15 +1,14 @@
 import asyncio
-from typing import List, Optional
+from typing import Optional
 import numpy as np
 import torch
 from tqdm import tqdm
-
 from latentsync.configs.config import GLOBAL_CONFIG
 from latentsync.inference.context import LipsyncContext
+from latentsync.inference.utils import align_audio_features
 from latentsync.utils.timer import Timer
 from latentsync.whisper.whisper.audio import load_audio
-from latentsync.inference.multi_infer import MultiProcessInference, MultiThreadInference
-
+from latentsync.inference.multi_infer import MultiThreadInference
 
 class AudioProcessor:
     def __init__(self, context: LipsyncContext):
@@ -25,7 +24,7 @@ class AudioProcessor:
         audio_features = self.audio_encoder.feature2chunks(feature_array=whisper_feature, fps=self.context.video_fps)
 
         # Align audio features with the number of faces
-        return self.align_audio_features(audio_features, num_faces)
+        return align_audio_features(audio_features, num_faces)
 
     # @Timer()
     @torch.no_grad()
@@ -41,18 +40,7 @@ class AudioProcessor:
         combined_features = self.process_audio(combined_samples)
         return combined_features[-num_frames:] if num_frames > 0 else []
 
-    @torch.no_grad()
-    def align_audio_features(self, audio_features: List[torch.Tensor], num_faces: int) -> List[torch.Tensor]:
-        """Ensure audio features match the number of faces by padding or trimming."""
-        if len(audio_features) < num_faces:
-            # Pad with last feature if needed
-            last_feature = audio_features[-1] if audio_features else torch.zeros_like(audio_features[0])
-            audio_features.extend([last_feature] * (num_faces - len(audio_features)))
-        elif num_faces > 0:
-            # Trim extra features
-            audio_features = audio_features[:num_faces]
 
-        return audio_features
 
 
 class AudioInference(MultiThreadInference):

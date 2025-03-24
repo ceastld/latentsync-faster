@@ -22,10 +22,6 @@ def main(args):
         video_out_path=args.video_out_path,
     )
 
-    Timer.summary()
-
-    print(f"Output video path: {args.video_out_path}")
-
 
 if __name__ == "__main__":
     demo = GLOBAL_CONFIG.inference.obama
@@ -35,8 +31,10 @@ if __name__ == "__main__":
     parser.add_argument("--video_out_path", type=str, default=demo.video_out_path)
     parser.add_argument("--v15", action="store_true")
     parser.add_argument("--seed", type=int, default=1247)
+    parser.add_argument("--time", action="store_true")
     args = parser.parse_args()
-
-    Timer.enable()
-
+    if args.time:
+        Timer.enable()
     main(args)
+    Timer.summary()
+    print(f"Output video path: {args.video_out_path}")

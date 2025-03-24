@@ -22,6 +22,8 @@ class WorkerStoppedException(Exception):
 
 
 class InferenceWorker:
+    warnings.filterwarnings("ignore", category=FutureWarning)
+
     def __init__(self, num_workers=1, worker_timeout=60):
         self.worker_timeout = worker_timeout
         self.task_queue = mp.Queue()  # Queue to hold tasks dynamically
@@ -33,6 +35,7 @@ class InferenceWorker:
         self.task_start_counter = Value("i", 0)
         self.task_wait_counter = Value("i", 0)
         self._stopped = Value("b", False)  # Boolean flag to indicate if workers are stopped
+        self.logger = logging.getLogger(self.__class__.__name__)
 
     def is_stopped(self):
         """Check if the workers have been stopped"""
@@ -92,7 +95,7 @@ class InferenceWorker:
                 result = await self.wait_one_result()
                 yield result
             except WorkerStoppedException:
-                print("stream stopped")
+                self.logger.info("stream stopped")
                 break
 
     async def wait_for_results(self, count: int, pbar: tqdm = None, remove=True):
@@ -173,9 +176,6 @@ class MultiThreadInference(InferenceWorker):
     This class implements thread-safe model inference using a shared model instance.
     Each worker thread has its own CUDA stream to avoid contention.
     """
-
-    warnings.filterwarnings("ignore", category=FutureWarning)
-    logger = logging.getLogger("MultiThreadInference")
 
     def __init__(self, num_workers=1, worker_timeout=60, enable_timer=False):
         """
@@ -286,7 +286,7 @@ class MultiThreadInference(InferenceWorker):
                         self.preprocess()
                         self.process_task(model, idx, input_data)
                     except Exception as e:
-                        print(f"Error in worker: {e}, worker exit")
+                        self.logger.error(f"Error in worker: {e}, worker exit")
                         traceback.print_exc()
                         break
                     finally:
@@ -410,7 +410,7 @@ class MultiProcessInference(InferenceWorker):
             try:
                 self.process_task(model, idx, input_data)
             except Exception as e:
-                print(f"Error in worker: {e}, worker exit")
+                self.logger.error(f"Error in worker: {e}, worker exit")
                 traceback.print_exc()
                 break
         self.worker_loaded_count.value -= 1

@@ -19,9 +19,9 @@ from latentsync.utils.video import cycle_video_stream, VideoReader, save_frames_
 
 
 class LatentSyncInference:
-    def __init__(self, context: LipsyncContext, worker_timeout=60, disable_progress=False):
+    def __init__(self, context: LipsyncContext, worker_timeout=60, enable_progress=False):
         self.context = context
-        self.disable_progress = disable_progress
+        self.enable_progress = enable_progress
 
         self.loop = asyncio.get_event_loop()
         self.tasks: Set[asyncio.Task] = set()
@@ -87,7 +87,7 @@ class LatentSyncInference:
         async for data in self.face_model.result_stream():
             await self.metadata_queue.put(data)
             if pbar is None:
-                pbar = tqdm(desc="Processing face", disable=self.disable_progress)
+                pbar = tqdm(desc="Processing face", disable=not self.enable_progress)
             pbar.update(1)
         self.metadata_queue.put_nowait(None)
         pbar.close()
@@ -97,7 +97,7 @@ class LatentSyncInference:
         async for data in self.audio_model.result_stream():
             await self.audio_feature_queue.put(data)
             if pbar is None:
-                pbar = tqdm(desc="Processing audio", disable=self.disable_progress)
+                pbar = tqdm(desc="Processing audio", disable=not self.enable_progress)
             pbar.update(1)
         self.audio_feature_queue.put_nowait(None)
         pbar.close()
@@ -117,14 +117,13 @@ class LatentSyncInference:
         async for metadata in self.lipsync_model.result_stream():
             self.lipsync_restore.push_data(metadata)
             if pbar is None:
-                pbar = tqdm(desc="Pushing data to lipsync restore", disable=self.disable_progress)
+                pbar = tqdm(desc="Pushing data to lipsync restore", disable=not self.enable_progress)
             pbar.update(1)
         self.lipsync_restore.add_end_task()
         pbar.close()
 
-    async def result_stream(self):
-        async for data in self.lipsync_restore.result_stream():
-            yield data
+    def result_stream(self):
+        return self.lipsync_restore.result_stream()
 
     def add_end_task(self):
         for worker in (self.audio_model, self.face_model):
@@ -132,12 +131,19 @@ class LatentSyncInference:
 
 
 class LatentSync:
-    def __init__(self, version=None, disable_progress=False, video_fps: int = 25):
+    def __init__(self, version=None, enable_progress=False, video_fps: int = 25, worker_timeout: int = 60):
         self.context = LipsyncContext.from_version(version)
-        self.disable_progress = disable_progress
+        self.enable_progress = enable_progress
         self.video_fps = video_fps
-        self.model = LatentSyncInference(self.context, disable_progress=disable_progress)
+        self.model = LatentSyncInference(
+            context=self.context,
+            enable_progress=enable_progress,
+            worker_timeout=worker_timeout,
+        )
         self.model.start_processing()
+
+    def stop_workers(self):
+        self.model.stop_workers()
 
     async def test(
         self,
@@ -152,7 +158,7 @@ class LatentSync:
         if save:
             save_frames_to_video(results, save_path, audio_path=audio_path)
             print(f"Saved to {save_path}")
-        self.model.stop_workers()
+        self.stop_workers()
 
     def push_frames(self, frame: Union[np.ndarray, List[np.ndarray]]):
         if isinstance(frame, np.ndarray):
@@ -167,6 +173,9 @@ class LatentSync:
         """
         audio: np.ndarray, sample_rate: 16000
         """
+        spf = self.context.samples_per_frame
+        if len(audio) % spf != 0:
+            audio = np.pad(audio, (0, spf - len(audio) % spf), mode="constant")
         self.model.push_audio(audio)
 
     def auto_push_data(self, video_path, audio_path, max_frames: int = None, fps: int = 30):
@@ -192,6 +201,9 @@ class LatentSync:
 
         self.model.add_end_task()
 
+    def result_stream(self):
+        return self.model.result_stream()
+
     async def get_all_results(self, total: int = None, save: bool = False):
         pbar = None
         output_frames = []
@@ -199,7 +211,7 @@ class LatentSync:
             if save:
                 output_frames.append(data)
             if pbar is None:
-                pbar = tqdm(desc="results", total=total, disable=self.disable_progress)
+                pbar = tqdm(desc="results", total=total, disable=not self.enable_progress)
             pbar.update(1)
         pbar.close()
         return output_frames

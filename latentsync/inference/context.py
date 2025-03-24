@@ -11,43 +11,80 @@ from latentsync.whisper.audio2feature import Audio2Feature
 from latentsync.models_v15.unet import UNet3DConditionModel as UNet3DConditionModel_v15
 
 
-@dataclass
 class LipsyncContext:
-    config: LipsyncConfig = GLOBAL_CONFIG.lipsync
-    # Basic parameters
-    audio_sample_rate: int = config.audio_sample_rate
-    video_fps: int = config.video_fps
-    num_frames: int = config.num_frames
-    audio_batch_size: int = config.audio_batch_size
-    height: int = config.height
-    width: int = config.width
-    resolution: int = config.width
-    samples_per_frame: int = config.samples_per_frame
+    def __init__(
+        self,
+        # Basic parameters
+        audio_sample_rate: int = None,
+        video_fps: int = None,
+        num_frames: int = None,
+        audio_batch_size: int = None,
+        height: int = None,
+        width: int = None,
+        resolution: int = None,
+        samples_per_frame: int = None,
+        # Inference parameters
+        num_inference_steps: int = None,
+        guidance_scale: float = None,
+        eta: float = None,
+        # Optional parameters
+        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
+        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
+        callback_steps: int = 1,
+        # Runtime parameters
+        device: str = None,
+        weight_dtype: torch.dtype = None,
+        batch_size: int = 1,
+        do_classifier_free_guidance: bool = None,
+        num_channels_latents: int = None,
+        extra_step_kwargs: dict = None,
+        # Model selection flags
+        use_compile: bool = False,
+        use_onnx: bool = False,
+        use_trt: bool = False,
+    ):
+        config = self.config
+        # Basic parameters
+        self.audio_sample_rate = audio_sample_rate or config.audio_sample_rate
+        self.video_fps = video_fps or config.video_fps
+        self.num_frames = num_frames or config.num_frames
+        self.audio_batch_size = audio_batch_size or config.audio_batch_size
+        self.height = height or config.height
+        self.width = width or config.width
+        self.resolution = resolution or self.width
+        self.samples_per_frame = samples_per_frame or config.samples_per_frame
 
-    # Inference parameters
-    num_inference_steps: int = config.num_inference_steps
-    guidance_scale: float = config.guidance_scale
-    eta: float = config.eta
+        # Inference parameters
+        self.num_inference_steps = num_inference_steps or config.num_inference_steps
+        self.guidance_scale = guidance_scale or config.guidance_scale
+        self.eta = eta or config.eta
 
-    # Optional parameters
-    generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None
-    callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None
-    callback_steps: int = 1
+        # Optional parameters
+        self.generator = generator
+        self.callback = callback
+        self.callback_steps = callback_steps
 
-    # Runtime parameters
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    weight_dtype: torch.dtype = config.weight_dtype
-    batch_size: int = 1
-    do_classifier_free_guidance: bool = None
-    num_channels_latents: int = None
-    extra_step_kwargs: dict = None
+        # Runtime parameters
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.weight_dtype = weight_dtype or config.weight_dtype
+        self.batch_size = batch_size
+        self.do_classifier_free_guidance = do_classifier_free_guidance
+        self.num_channels_latents = num_channels_latents
+        self.extra_step_kwargs = extra_step_kwargs
 
-    # Model selection flags
-    use_compile: bool = False
-    use_onnx: bool = False
-    use_trt: bool = False
+        # Model selection flags
+        self.use_compile = use_compile
+        self.use_onnx = use_onnx
+        self.use_trt = use_trt
 
-    def __post_init__(self):
+        # Post initialization
+        self._post_init()
+
+    @property
+    def config(self) -> LipsyncConfig:
+        return GLOBAL_CONFIG.lipsync
+
+    def _post_init(self):
         # Set do_classifier_free_guidance based on guidance_scale
         self.do_classifier_free_guidance = self.guidance_scale > 1.0
 
@@ -84,17 +121,17 @@ class LipsyncContext:
         import os
         from latentsync.models.onnx_wrapper import ONNXModelWrapper
 
-        # 构建ONNX模型路径 - 使用相同的名称但后缀为.onnx
+        # Build ONNX model path - use same name but with .onnx suffix
         onnx_path = os.path.join(os.path.dirname(GLOBAL_CONFIG.latentsync_unet_path_v15), "unet.onnx")
 
-        # 检查ONNX模型是否存在
+        # Check if ONNX model exists
         if not os.path.exists(onnx_path):
             raise FileNotFoundError(f"ONNX model not found at {onnx_path}. Please export the model first.")
 
-        # 创建ONNX模型包装器
+        # Create ONNX model wrapper
         unet = ONNXModelWrapper(onnx_path, device=self.device)
 
-        # 设置与PyTorch模型相同的dtype属性（仅用于欺骗编译器，不影响实际运行）
+        # Set same dtype attribute as PyTorch model (only for compiler, doesn't affect runtime)
         unet.dtype = self.weight_dtype
 
         return unet
@@ -104,17 +141,17 @@ class LipsyncContext:
         import os
         from latentsync.models.trt_wrapper import TRTModelWrapper
 
-        # 构建TensorRT引擎路径 - 使用相同的名称但后缀为.engine
+        # Build TensorRT engine path - use same name but with .engine suffix
         engine_path = os.path.join(os.path.dirname(GLOBAL_CONFIG.latentsync_unet_path_v15), "latentsync_unet.engine")
 
-        # 检查TensorRT引擎是否存在
+        # Check if TensorRT engine exists
         if not os.path.exists(engine_path):
             raise FileNotFoundError(f"TensorRT engine not found at {engine_path}. Please export the model first.")
 
-        # 创建TensorRT模型包装器
+        # Create TensorRT model wrapper
         unet = TRTModelWrapper(engine_path, device=self.device)
 
-        # 设置与PyTorch模型相同的dtype属性（仅用于欺骗编译器，不影响实际运行）
+        # Set same dtype attribute as PyTorch model (only for compiler, doesn't affect runtime)
         unet.dtype = self.weight_dtype
 
         return unet
@@ -150,9 +187,10 @@ class LipsyncContext:
 
 
 class LipsyncContext_v15(LipsyncContext):
-    def __post_init__(self):
-        super().__post_init__()
-        self.num_frames: int = 24
+    
+    @property
+    def config(self) -> LipsyncConfig:
+        return GLOBAL_CONFIG.lipsync_v15
 
     def create_vae(self) -> AutoencoderKL:
         """Create VAE model for encoding/decoding images"""
