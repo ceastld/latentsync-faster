@@ -93,10 +93,11 @@ class LipsyncConfig:
     weight_dtype = get_dtype()
     eta = 0.0
     seed = 1247
-
+    vae_type = "tiny"
+    
 class LipsyncConfig_v15(LipsyncConfig):
     num_frames = 16
-
+    vae_type = "kl"
 
 @dataclass
 class InferPackage:

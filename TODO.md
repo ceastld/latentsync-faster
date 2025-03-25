@@ -13,6 +13,7 @@
 
 * latentsync 1.5, new model
 * 优化没有识别到人脸情况下的输出，直接输出原始图片
+* pose 变化就不处理，
 
 # speed test
 * ori var and unet

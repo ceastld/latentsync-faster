@@ -19,15 +19,8 @@ async def main(max_frames: int = None):
     model = LatentSync(version="v15")
     example = GLOBAL_CONFIG.inference.obama
     model.push_video_stream(example.video_path, example.audio_path, max_frames, fps=25)
-    results = []
-
-    pbar = None
-    async for result in model.result_stream():
-        results.append(result)
-        if pbar is None:
-            pbar = tqdm(desc="Processing")
-        pbar.update(1)
-    pbar.close()
+    
+    results = await model.get_all_results()
 
     save_frames_to_video(results, example.video_out_path, audio_path=example.audio_path)
     print(f"Saved to {example.video_out_path}")

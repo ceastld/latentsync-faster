@@ -213,13 +213,13 @@ class LatentSync:
     def result_stream(self):
         return self.model.result_stream()
 
-    async def get_all_results(self, total: int = None):
+    async def get_all_results(self, total: int = None, disable_progress: bool = False):
         pbar = None
         output_frames = []
         async for data in self.model.result_stream():
             output_frames.append(data)
             if pbar is None:
-                pbar = tqdm(desc="results", total=total, disable=not self.enable_progress)
+                pbar = tqdm(desc="results", total=total, disable=disable_progress)
             pbar.update(1)
         pbar.close()
         return output_frames

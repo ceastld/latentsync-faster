@@ -52,6 +52,8 @@ class LipsyncContext:
         use_onnx: bool = False,
         use_trt: bool = False,
         seed: int = None,
+        # VAE selection
+        vae_type: Optional[str] = None,
     ):
         config = self.config
         # Basic parameters
@@ -87,6 +89,12 @@ class LipsyncContext:
         self.use_onnx = use_onnx
         self.use_trt = use_trt
         self.seed = seed or config.seed
+        
+        # VAE selection
+        self.vae_type = (vae_type or config.vae_type).lower()
+        if self.vae_type not in ["tiny", "kl"]:
+            raise ValueError("vae_type must be either 'tiny' or 'kl'")
+            
         # Post initialization
         self._post_init()
 
@@ -169,10 +177,23 @@ class LipsyncContext:
 
         return unet
 
-    def create_vae(self) -> AutoencoderTiny:
+    def create_vae(self) -> Union[AutoencoderTiny, AutoencoderKL]:
+        """Create VAE model for encoding/decoding images based on selected type"""
+        if self.vae_type == "tiny":
+            return self.create_vae_tiny()
+        else:  # kl
+            return self.create_vae_kl()
+    
+    def create_vae_tiny(self) -> AutoencoderTiny:
         """Create VAE model for encoding/decoding images"""
         vae = AutoencoderTiny.from_pretrained("madebyollin/taesd", torch_dtype=self.weight_dtype)
         vae.config.scaling_factor = 1.0
+        vae.config.shift_factor = 0
+        return vae.eval().to(self.device)
+
+    def create_vae_kl(self) -> AutoencoderKL:
+        vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", torch_dtype=self.weight_dtype)
+        vae.config.scaling_factor = 0.18215
         vae.config.shift_factor = 0
         return vae.eval().to(self.device)
 
@@ -193,23 +214,21 @@ class LipsyncContext:
     
     @staticmethod
     def from_version(version: str, **kwargs) -> "LipsyncContext":
+        """
+        version: str in ["v15", "v10"]
+        """
+        version = version or "v15"
         if version == "v15":
             return LipsyncContext_v15(**kwargs)
-        else:
+        elif version == "v10":
             return LipsyncContext(**kwargs)
+        else:
+            raise ValueError(f"Invalid version: {version}")
 
 class LipsyncContext_v15(LipsyncContext):
-    
     @property
     def config(self) -> LipsyncConfig:
         return GLOBAL_CONFIG.lipsync_v15
-
-    def create_vae(self) -> AutoencoderKL:
-        """Create VAE model for encoding/decoding images"""
-        vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", torch_dtype=self.weight_dtype)
-        vae.config.scaling_factor = 0.18215
-        vae.config.shift_factor = 0
-        return vae.eval().to(self.device)
 
     def create_unet(self) -> UNet3DConditionModel_v15:
         """Create UNet model for diffusion"""

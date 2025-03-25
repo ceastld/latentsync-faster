@@ -221,14 +221,14 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
     
     @Timer()
     def get_vae_latents(self, images):
-        if isinstance(self.lipsync_context, LipsyncContext_v15):
+        if self.lipsync_context.vae_type == "kl":
             masked_image_latents = self.vae.encode(images).latent_dist.sample(generator=self.lipsync_context.generator)
             masked_image_latents = (masked_image_latents - self.vae.config.shift_factor) * self.vae.config.scaling_factor
             return masked_image_latents # AutoencoderKL
-        elif isinstance(self.lipsync_context, LipsyncContext):
+        elif self.lipsync_context.vae_type == "tiny":
             return self.vae.encode(images).latents # AutoencoderTiny
         else:
-            raise ValueError(f"Unsupported VAE type: {type(self.vae)}")
+            raise ValueError(f"Unsupported VAE type: {self.lipsync_context.vae_type}")
 
     # @Timer()
     def prepare_image_latents(self, context: LipsyncContext, images: torch.Tensor):
