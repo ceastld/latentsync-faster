@@ -13,7 +13,7 @@
 * v1 L4 25fps bs8, v1.5 A100 25fps bs16
 
 * TODO: 优化没有识别到人脸情况下的输出，直接输出原始图片
-
+* pose 变化就不处理，
 
 # speed test
 * ori var and unet

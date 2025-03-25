@@ -3,6 +3,7 @@ import asyncio
 from functools import cached_property
 from typing import List, Set, Union
 
+import cv2
 import numpy as np
 from tqdm import tqdm
 from latentsync.configs.config import GLOBAL_CONFIG
@@ -131,8 +132,8 @@ class LatentSyncInference:
 
 
 class LatentSync:
-    def __init__(self, version=None, enable_progress=False, video_fps: int = 25, worker_timeout: int = 60):
-        self.context = LipsyncContext.from_version(version)
+    def __init__(self, version=None, enable_progress=False, video_fps: int = 25, worker_timeout: int = 60, num_frames: int = None):
+        self.context = LipsyncContext.from_version(version, num_frames=num_frames)
         self.enable_progress = enable_progress
         self.video_fps = video_fps
         self.model = LatentSyncInference(
@@ -152,9 +153,9 @@ class LatentSync:
         save_path=None,
         max_frames: int = 200,
     ):
-        self.auto_push_data(video_path, audio_path, max_frames, fps=self.video_fps)
+        self.push_video_stream(video_path, audio_path, max_frames, fps=self.video_fps)
         save = save_path is not None
-        results = await self.get_all_results(max_frames, save)
+        results = await self.get_all_results(max_frames)
         if save:
             save_frames_to_video(results, save_path, audio_path=audio_path)
             print(f"Saved to {save_path}")
@@ -168,6 +169,14 @@ class LatentSync:
                 self.model.push_face(f)
         else:
             raise ValueError(f"Invalid frame type: {type(frame)}")
+        
+    def push_img_and_audio(self, image_path: str, audio_path: str):
+        audio_clips = load_audio_clips(audio_path, self.context.samples_per_frame)
+        frame = cv2.imread(image_path)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        self.push_frames([frame]*len(audio_clips))
+        self.push_audio(audio_clips)
+        self.model.add_end_task()
 
     def push_audio(self, audio: np.ndarray):
         """
@@ -178,10 +187,10 @@ class LatentSync:
             audio = np.pad(audio, (0, spf - len(audio) % spf), mode="constant")
         self.model.push_audio(audio)
 
-    def auto_push_data(self, video_path, audio_path, max_frames: int = None, fps: int = 30):
-        self.model.create_task(self._auto_push_data(video_path, audio_path, max_frames, fps))
+    def push_video_stream(self, video_path, audio_path, max_frames: int = None, fps: int = 30):
+        self.model.create_task(self._push_video_streaming(video_path, audio_path, max_frames, fps))
 
-    async def _auto_push_data(self, video_path, audio_path, max_frames: int = None, fps: int = 30):
+    async def _push_video_streaming(self, video_path, audio_path, max_frames: int = None, fps: int = 30):
         audio_clips = load_audio_clips(audio_path, self.context.samples_per_frame)
         frame_interval = 1 / fps  # Target frame interval for 30fps
         last_frame_time = asyncio.get_event_loop().time()
@@ -204,14 +213,13 @@ class LatentSync:
     def result_stream(self):
         return self.model.result_stream()
 
-    async def get_all_results(self, total: int = None, save: bool = False):
+    async def get_all_results(self, total: int = None, disable_progress: bool = False):
         pbar = None
         output_frames = []
         async for data in self.model.result_stream():
-            if save:
-                output_frames.append(data)
+            output_frames.append(data)
             if pbar is None:
-                pbar = tqdm(desc="results", total=total, disable=not self.enable_progress)
+                pbar = tqdm(desc="results", total=total, disable=disable_progress)
             pbar.update(1)
         pbar.close()
         return output_frames
