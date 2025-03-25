@@ -1,6 +1,7 @@
 from latentsync import *
 import argparse
 
+
 def main():
     parser = argparse.ArgumentParser(description="LatentSync 视频唇形同步")
     parser.add_argument("--onnx", action="store_true", help="使用ONNX模型加速")
@@ -14,7 +15,11 @@ def main():
         Timer.enable()
 
     demo = GLOBAL_CONFIG.inference.obama
-    context = LipsyncContext(use_onnx=args.onnx, use_trt=args.trt)
+    context = LipsyncContext.from_version(
+        "v15",
+        use_onnx=args.onnx,
+        use_trt=args.trt,
+    )
     model = LipsyncModel(context)
     model.inference(
         demo.video_path,
@@ -23,6 +28,7 @@ def main():
     )
     Timer.summary()
     print(f"输出视频保存到: {demo.video_out_path}")
+
 
 if __name__ == "__main__":
     main()
