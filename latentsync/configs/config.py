@@ -10,6 +10,7 @@ CHECKPOINT_DIR = str(ROOT_DIR / "checkpoints")
 ASSETS_DIR = str(ROOT_DIR / "assets")
 CONFIG_DIR = os.path.dirname(__file__)
 OUTPUT_DIR = str(ROOT_DIR / "output")
+TEST_DIR = str(ROOT_DIR / "testset")
 
 
 class Config:
@@ -17,7 +18,7 @@ class Config:
     checkpoint_dir = CHECKPOINT_DIR
     assets_dir = ASSETS_DIR
     output_dir = OUTPUT_DIR
-
+    test_dir = TEST_DIR
     def get_config_path(self, *sub_path):
         return os.path.join(self.config_dir, *sub_path)
 
