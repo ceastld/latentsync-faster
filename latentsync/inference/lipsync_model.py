@@ -36,6 +36,13 @@ class LipsyncModel:
             self.context,
         )
         return synced_faces_batch
+    
+    def process_metadata_batch(self, metadata_list: List[LipsyncMetadata]):
+        """
+        audio feature is stored in metadata
+        """
+        audio_features = [metadata.audio_feature_tensor for metadata in metadata_list]
+        return self.process_batch(metadata_list, audio_features)
 
     @Timer()
     @torch.no_grad()

@@ -22,8 +22,10 @@ pip install -r requirements.txt
 # OpenCV dependencies
 sudo apt -y install libgl1
 
-# Download all the checkpoints from HuggingFace
+# Download all the checkpoints and testdata from HuggingFace
 git clone https://huggingface.co/Pinch-Research/latentsync checkpoints
+git clone https://huggingface.co/Pinch-Research/latentsync_testset testset
+
 
 # Soft links for the auxiliary models
 mkdir -p ~/.cache/torch/hub/checkpoints

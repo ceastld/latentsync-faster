@@ -1,14 +1,15 @@
 import asyncio
-from typing import Optional
+from typing import List, Optional
 import numpy as np
 import torch
 from tqdm import tqdm
 from latentsync.configs.config import GLOBAL_CONFIG
 from latentsync.inference.context import LipsyncContext
-from latentsync.inference.utils import align_audio_features
+from latentsync.inference.utils import align_audio_features, load_audio_clips, preprocess_audio
 from latentsync.utils.timer import Timer
 from latentsync.whisper.whisper.audio import load_audio
 from latentsync.inference.multi_infer import MultiThreadInference
+
 
 class AudioProcessor:
     def __init__(self, context: LipsyncContext):
@@ -39,8 +40,6 @@ class AudioProcessor:
 
         combined_features = self.process_audio(combined_samples)
         return combined_features[-num_frames:] if num_frames > 0 else []
-
-
 
 
 class AudioInference(MultiThreadInference):
@@ -81,6 +80,32 @@ class AudioInference(MultiThreadInference):
             audio = audio.cpu().numpy()
         clips = audio.reshape(-1, self.context.samples_per_frame)
         self.add_tasks(clips)
+
+
+class AudioBatchInference(MultiThreadInference):
+    def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60):
+        super().__init__(num_workers, worker_timeout)
+        self.context = context
+        self.last_audio_samples = None
+        self.audio_buffer = []
+
+    def get_model(self):
+        return AudioProcessor(self.context)
+
+    def push_audio(self, audio: np.ndarray):
+        audio = preprocess_audio(audio, self.context.samples_per_frame)
+        if len(self.audio_buffer) < self.context.audio_batch_size:
+            self.audio_buffer.append(audio)
+        else:
+            audio = np.concatenate(self.audio_buffer)
+            self.add_one_task(audio)
+            self.audio_buffer = []
+
+    def infer_task(self, model: AudioProcessor, data: List[np.ndarray]):
+        audio_samples = np.concatenate(data)
+        results = model.process_audio_with_pre(self.last_audio_samples, audio_samples)
+        self.last_audio_samples = audio_samples
+        return results
 
 
 async def auto_push_audio(audio_file, infer: AudioInference):

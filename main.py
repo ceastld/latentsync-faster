@@ -14,17 +14,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-async def main(max_frames: int = None):
-    model = LatentSync(version="v15")
-    example = GLOBAL_CONFIG.inference.obama
-    model.push_video_stream(example.video_path, example.audio_path, max_frames, fps=25)
-    
-    results = await model.get_all_results()
-
-    save_frames_to_video(results, example.video_out_path, audio_path=example.audio_path)
-    print(f"Saved to {example.video_out_path}")
-
 async def test():
     model = LatentSync(version="v15")
     audio_path = "assets/cxk.mp3"
@@ -33,6 +22,16 @@ async def test():
     results = await model.get_all_results()
     save_frames_to_video(results, save_path, audio_path=audio_path)
     print(f"Saved to {save_path}")
+
+async def main(max_frames: int = None):
+    model = LatentSync(version="v15")
+    example = GLOBAL_CONFIG.inference.obama
+    model.push_video_stream(example.video_path, example.audio_path, max_frames, fps=25)
+    results = await model.get_all_results()
+    logger.info(f"Results: {len(results)}")
+    save_frames_to_video(results, example.video_out_path, audio_path=example.audio_path)
+    print(f"Saved to {example.video_out_path}")
+
 
 if __name__ == "__main__":
     # Timer.enable()

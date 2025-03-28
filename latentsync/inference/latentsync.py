@@ -7,8 +7,8 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 from latentsync.configs.config import GLOBAL_CONFIG
-from latentsync.inference.lipsync_infer import LipsyncInference, LipsyncRestore
-from latentsync.inference.audio_infer import AudioInference
+from latentsync.inference.lipsync_infer import LipsyncBatchInference, LipsyncInference, LipsyncRestore
+from latentsync.inference.audio_infer import AudioBatchInference, AudioInference
 from latentsync.inference.context import LipsyncContext, LipsyncContext_v15
 from latentsync.inference.face_infer import FaceInference
 from latentsync.inference.multi_infer import MultiThreadInference
@@ -29,12 +29,12 @@ class LatentSyncInference:
         self.metadata_queue: asyncio.Queue[LipsyncMetadata] = asyncio.Queue()
         self.audio_feature_queue: asyncio.Queue[np.ndarray] = asyncio.Queue()
 
-        self.lipsync_model = LipsyncInference(context=context, worker_timeout=worker_timeout)
+        self.lipsync_model = LipsyncBatchInference(context=context, worker_timeout=worker_timeout)
         self.lipsync_model.start_workers()
         self.lipsync_model.wait_worker_loaded()
         self.face_model = FaceInference(context=context, worker_timeout=worker_timeout)
         self.face_model.start_workers()
-        self.audio_model = AudioInference(context=context, worker_timeout=worker_timeout)
+        self.audio_model = AudioBatchInference(context=context, worker_timeout=worker_timeout)
         self.audio_model.start_workers()
         self.lipsync_restore = LipsyncRestore(context=context, worker_timeout=worker_timeout)
         self.lipsync_restore.start_workers()
@@ -52,9 +52,11 @@ class LatentSyncInference:
             worker.wait_worker_loaded()
 
     def push_face(self, frame: np.ndarray):
+        """frame: np.ndarray, shape: (H, W, 3), dtype: uint8"""
         self.face_model.push_frame(frame)
 
     def push_audio(self, audio: np.ndarray):
+        """audio: np.ndarray, shape: (T,), dtype: float32"""
         self.audio_model.push_audio(audio)
 
     def stop_workers(self):
@@ -95,28 +97,38 @@ class LatentSyncInference:
 
     async def process_audio(self):
         pbar = None
-        async for data in self.audio_model.result_stream():
-            await self.audio_feature_queue.put(data)
+        async for data_list in self.audio_model.result_stream():
+            for data in data_list:
+                await self.audio_feature_queue.put(data)
             if pbar is None:
                 pbar = tqdm(desc="Processing audio", disable=not self.enable_progress)
-            pbar.update(1)
+            pbar.update(len(data_list))
         self.audio_feature_queue.put_nowait(None)
         pbar.close()
 
     async def push_data_to_lipsync(self):
+        batch: List[LipsyncMetadata] = []
         while self.is_alive():
             metadata = await self.metadata_queue.get()
-            audio_feature = await self.audio_feature_queue.get()
-            if metadata is None or audio_feature is None:
-                self.lipsync_model.add_end_task()
+            metadata.audio_feature = await self.audio_feature_queue.get()
+            # 这里需要详细检测face能不能用，push要直接push一个batch
+            if metadata is None or metadata.audio_feature is None:
+                print("metadata is None or metadata.audio_feature is None")
+                if len(batch) > 0:
+                    self.lipsync_model.push_batch(batch)
                 break
-            metadata.audio_feature = audio_feature
-            self.lipsync_model.push_data(metadata)
+            batch.append(metadata)
+            if len(batch) >= self.context.num_frames:
+                # test None face
+                # batch[0].face = None
+                self.lipsync_model.push_batch(batch)
+                batch = []
+        self.lipsync_model.add_end_task()
 
     async def push_data_to_lipsync_restore(self):
         pbar = None
-        async for metadata in self.lipsync_model.result_stream():
-            self.lipsync_restore.push_data(metadata)
+        async for metadata_list in self.lipsync_model.result_stream():
+            self.lipsync_restore.push_data(metadata_list)
             if pbar is None:
                 pbar = tqdm(desc="Pushing data to lipsync restore", disable=not self.enable_progress)
             pbar.update(1)
@@ -221,5 +233,6 @@ class LatentSync:
             if pbar is None:
                 pbar = tqdm(desc="results", total=total, disable=disable_progress)
             pbar.update(1)
-        pbar.close()
+        if pbar is not None:
+            pbar.close()
         return output_frames

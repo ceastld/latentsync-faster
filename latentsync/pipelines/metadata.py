@@ -22,6 +22,13 @@ class LipsyncMetadata:
         if isinstance(self.face, torch.Tensor):
             return self.face
         return torch.from_numpy(self.face)
+    
+    @property
+    def audio_feature_tensor(self):
+        assert self.audio_feature is not None
+        if isinstance(self.audio_feature, torch.Tensor):
+            return self.audio_feature
+        return torch.from_numpy(self.audio_feature)
 
     @torch.no_grad()
     def set_sync_face(self, face: torch.Tensor):

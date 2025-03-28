@@ -9,10 +9,10 @@ from latentsync.whisper.whisper.audio import load_audio
 
 def create_diffusion_pipeline(context: LipsyncContext) -> LipsyncDiffusionPipeline:
     """Create lipsync diffusion pipeline with all components
-    
+
     Args:
         context: Lipsync context
-    
+
     Returns:
         LipsyncDiffusionPipeline: The lipsync diffusion pipeline
     """
@@ -26,10 +26,10 @@ def create_diffusion_pipeline(context: LipsyncContext) -> LipsyncDiffusionPipeli
 
 def create_pipeline(context: LipsyncContext) -> LipsyncPipeline:
     """Create lipsync pipeline with all components
-    
+
     Args:
         context: Lipsync context
-    
+
     Returns:
         LipsyncPipeline: The lipsync pipeline
     """
@@ -42,15 +42,16 @@ def create_pipeline(context: LipsyncContext) -> LipsyncPipeline:
     ).to(context.device)
 
 
+def preprocess_audio(audio: np.ndarray, samples_per_frame: int):
+    if len(audio) % samples_per_frame != 0:
+        padding_size = samples_per_frame - len(audio) % samples_per_frame
+        audio = np.pad(audio, (0, padding_size), mode="constant")
+    return audio.reshape(-1, samples_per_frame)
+
+
 def load_audio_clips(audio_path: str, samples_per_frame: int):
     audio_samples = load_audio(audio_path)
-    padding_size = samples_per_frame - len(audio_samples) % samples_per_frame
-    audio_samples = np.pad(
-        audio_samples,
-        (0, padding_size),
-        mode="constant",
-    )
-    audio_clips = audio_samples.reshape(-1, samples_per_frame)
+    audio_clips = preprocess_audio(audio_samples, samples_per_frame)
     return audio_clips
 
 
