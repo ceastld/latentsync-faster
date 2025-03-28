@@ -4,8 +4,7 @@ from latentsync import *
 def main(args):
     print(f"Input video path: {args.video_path}")
     print(f"Input audio path: {args.audio_path}")
-
-    context = LipsyncContext_v15() if args.v15 else LipsyncContext()
+    context = LipsyncContext.from_version(args.version or "v15")
     pipeline = create_pipeline(context)
     pipeline(
         video_path=args.video_path,
@@ -20,7 +19,7 @@ if __name__ == "__main__":
     parser.add_argument("--video_path", type=str, default=demo.video_path)
     parser.add_argument("--audio_path", type=str, default=demo.audio_path)
     parser.add_argument("--video_out_path", type=str, default=demo.video_out_path)
-    parser.add_argument("--v15", action="store_true")
+    parser.add_argument("--version", type=str, default="v15")
     parser.add_argument("--seed", type=int, default=1247)
     parser.add_argument("--time", action="store_true")
     args = parser.parse_args()
