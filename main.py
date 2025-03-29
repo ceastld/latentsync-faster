@@ -24,7 +24,7 @@ async def test():
     print(f"Saved to {save_path}")
 
 async def main(max_frames: int = None):
-    model = LatentSync(version="v15")
+    model = LatentSync(version="v15", enable_progress=True)
     example = GLOBAL_CONFIG.inference.obama
     model.push_video_stream(example.video_path, example.audio_path, max_frames, fps=25)
     results = await model.get_all_results()

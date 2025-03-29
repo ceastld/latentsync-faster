@@ -107,22 +107,15 @@ class LatentSyncInference:
         pbar.close()
 
     async def push_data_to_lipsync(self):
-        batch: List[LipsyncMetadata] = []
         while self.is_alive():
             metadata = await self.metadata_queue.get()
-            metadata.audio_feature = await self.audio_feature_queue.get()
-            # 这里需要详细检测face能不能用，push要直接push一个batch
-            if metadata is None or metadata.audio_feature is None:
-                print("metadata is None or metadata.audio_feature is None")
-                if len(batch) > 0:
-                    self.lipsync_model.push_batch(batch)
+            if metadata is None:
                 break
-            batch.append(metadata)
-            if len(batch) >= self.context.num_frames:
-                # test None face
-                # batch[0].face = None
-                self.lipsync_model.push_batch(batch)
-                batch = []
+            audio_feature = await self.audio_feature_queue.get()
+            if audio_feature is None:
+                break
+            metadata.audio_feature = audio_feature
+            self.lipsync_model.push_data(metadata)
         self.lipsync_model.add_end_task()
 
     async def push_data_to_lipsync_restore(self):
@@ -131,7 +124,7 @@ class LatentSyncInference:
             self.lipsync_restore.push_data(metadata_list)
             if pbar is None:
                 pbar = tqdm(desc="Pushing data to lipsync restore", disable=not self.enable_progress)
-            pbar.update(1)
+            pbar.update(len(metadata_list))
         self.lipsync_restore.add_end_task()
         pbar.close()
 
@@ -139,9 +132,8 @@ class LatentSyncInference:
         return self.lipsync_restore.result_stream()
 
     def add_end_task(self):
-        for worker in (self.audio_model, self.face_model):
-            worker.add_end_task()
-
+        self.face_model.add_end_task()
+        self.audio_model.add_end_task()
 
 class LatentSync:
     def __init__(self, version=None, enable_progress=False, video_fps: int = 25, worker_timeout: int = 60, num_frames: int = None):
@@ -206,7 +198,7 @@ class LatentSync:
         audio_clips = load_audio_clips(audio_path, self.context.samples_per_frame)
         frame_interval = 1 / fps  # Target frame interval for 30fps
         last_frame_time = asyncio.get_event_loop().time()
-
+        # 240 frames
         for i, frame in enumerate(cycle_video_stream(video_path, max_frames=max_frames)):
             current_time = asyncio.get_event_loop().time()
             elapsed = current_time - last_frame_time

@@ -7,6 +7,7 @@ from typing import List, Union
 
 from latentsync.utils.affine_transform import AlignRestore
 from latentsync.utils.timer import Timer
+from latentsync.inference.buffer_infer import BufferInference
 
 
 class LipsyncInference(MultiThreadInference):
@@ -37,16 +38,19 @@ class LipsyncInference(MultiThreadInference):
                 self._set_result(self.result_start_idx + i, result)
             self.data_buffer = []
 
-class LipsyncBatchInference(MultiThreadInference):
+class LipsyncBatchInference(BufferInference[LipsyncMetadata, LipsyncMetadata]):
     def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60):
-        super().__init__(num_workers, worker_timeout)
+        super().__init__(context.num_frames, num_workers, worker_timeout)
         self.context = context
-
+    
     def get_model(self):
         return LipsyncModel(self.context)
     
-    def push_batch(self, data: List[LipsyncMetadata]):
-        self.add_one_task(data)
+    def push_data(self, data: Union[LipsyncMetadata, List[LipsyncMetadata]]):
+        if isinstance(data, list):
+            self.push_data_batch(data)
+        else:
+            super().push_data(data)
 
     def infer_task(self, model: LipsyncModel, data: List[LipsyncMetadata]):
         assert len(data) <= self.context.num_frames, f"data length should <= num_frames: {self.context.num_frames}"
@@ -66,6 +70,7 @@ class LipsyncRestore(MultiThreadInference):
         return AlignRestore()
     
     def push_data(self, data: Union[LipsyncMetadata, List[LipsyncMetadata]]):
+        self.add_tasks
         if isinstance(data, list):
             for d in data:
                 self.add_one_task(d)
