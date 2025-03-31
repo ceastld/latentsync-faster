@@ -136,6 +136,45 @@ class LatentSyncInference:
         self.audio_model.add_end_task()
 
 class LatentSync:
+    """A class for lip-syncing videos using latent diffusion models.
+
+    This class provides methods for processing frames and audio data manually.
+    It supports both synchronous and asynchronous operations for frame and audio processing.
+
+    Args:
+        version (str, optional): Model version to use. Defaults to None.
+        enable_progress (bool, optional): Whether to enable progress bars. Defaults to False.
+        video_fps (int, optional): Target FPS for video processing. Defaults to 25.
+        worker_timeout (int, optional): Timeout for worker processes in seconds. Defaults to 60.
+        num_frames (int, optional): Maximum number of frames to process. Defaults to None.
+
+    Examples:
+        Manual frame and audio processing:
+        ```python
+        model = LatentSync(version="v15")
+        
+        # Push frames
+        frame = cv2.imread("input.jpg")
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        model.push_frames(frame)  # Single frame
+        model.push_frames([frame] * 10)  # Multiple frames
+        
+        # Push audio
+        audio_data = load_audio("input.mp3")  # Your audio loading function
+        model.push_audio(audio_data)
+        
+        # Mark end of input
+        model.model.add_end_task()
+        
+        # Process results as they come in
+        frames = []
+        async for frame in model.result_stream():
+            frames.append(frame)
+            # You can process each frame as it's generated
+            # process_frame(frame)
+        ```
+    """
+
     def __init__(self, version=None, enable_progress=False, video_fps: int = 25, worker_timeout: int = 60, num_frames: int = None):
         self.context = LipsyncContext.from_version(version, num_frames=num_frames)
         self.enable_progress = enable_progress
@@ -148,24 +187,30 @@ class LatentSync:
         self.model.start_processing()
 
     def stop_workers(self):
+        """Stop all worker processes."""
         self.model.stop_workers()
 
-    async def test(
-        self,
-        video_path,
-        audio_path,
-        save_path=None,
-        max_frames: int = 200,
-    ):
-        self.push_video_stream(video_path, audio_path, max_frames, fps=self.video_fps)
-        save = save_path is not None
-        results = await self.get_all_results(max_frames)
-        if save:
-            save_frames_to_video(results, save_path, audio_path=audio_path)
-            print(f"Saved to {save_path}")
-        self.stop_workers()
-
     def push_frames(self, frame: Union[np.ndarray, List[np.ndarray]]):
+        """Push one or more frames to the processing pipeline.
+
+        Args:
+            frame (Union[np.ndarray, List[np.ndarray]]): Single frame or list of frames.
+                Each frame should be a numpy array in RGB format.
+
+        Raises:
+            ValueError: If frame type is not supported.
+
+        Example:
+            ```python
+            # Single frame
+            frame = cv2.imread("input.jpg")
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            model.push_frames(frame)
+            
+            # Multiple frames
+            model.push_frames([frame] * 10)
+            ```
+        """
         if isinstance(frame, np.ndarray):
             self.model.push_face(frame)
         elif isinstance(frame, list):
@@ -183,8 +228,22 @@ class LatentSync:
         self.model.add_end_task()
 
     def push_audio(self, audio: np.ndarray):
-        """
-        audio: np.ndarray, sample_rate: 16000
+        """Push audio data to the processing pipeline.
+
+        Args:
+            audio (np.ndarray): Audio data as numpy array with sample rate 16000.
+                The audio will be automatically padded to match the frame rate.
+
+        Note:
+            The audio data should have a sample rate of 16000 Hz.
+            The length will be automatically padded to match the frame rate.
+
+        Example:
+            ```python
+            # Load and push audio data
+            audio_data = load_audio("input.mp3")  # Your audio loading function
+            model.push_audio(audio_data)
+            ```
         """
         spf = self.context.samples_per_frame
         if len(audio) % spf != 0:
@@ -192,6 +251,18 @@ class LatentSync:
         self.model.push_audio(audio)
 
     def push_video_stream(self, video_path, audio_path, max_frames: int = None, fps: int = 30):
+        """Push a video stream with audio for processing.
+
+        Args:
+            video_path (str): Path to the input video file.
+            audio_path (str): Path to the input audio file.
+            max_frames (int, optional): Maximum number of frames to process. Defaults to None.
+            fps (int, optional): Target FPS for video processing. Defaults to 30.
+
+        Note:
+            This method creates an asynchronous task for video streaming.
+            The video will be processed frame by frame at the specified FPS.
+        """
         self.model.create_task(self._push_video_streaming(video_path, audio_path, max_frames, fps))
 
     async def _push_video_streaming(self, video_path, audio_path, max_frames: int = None, fps: int = 30):
@@ -215,9 +286,48 @@ class LatentSync:
         self.model.add_end_task()
 
     def result_stream(self):
+        """Get an async iterator for streaming results as they are generated.
+
+        Returns:
+            AsyncIterator: An async iterator that yields processed frames.
+
+        Example:
+            ```python
+            # Process results as they come in
+            frames = []
+            async for frame in model.result_stream():
+                frames.append(frame)
+                # You can process each frame as it's generated
+                # process_frame(frame)
+            ```
+        """
         return self.model.result_stream()
 
     async def get_all_results(self, total: int = None, disable_progress: bool = False):
+        """Get all processed results as a list.
+
+        Args:
+            total (int, optional): Total number of expected results for progress bar.
+                Defaults to None.
+            disable_progress (bool, optional): Whether to disable progress bar.
+                Defaults to False.
+
+        Returns:
+            List: List of all processed frames.
+
+        Note:
+            This method will wait for all processing to complete before returning.
+            For streaming results as they come in, use result_stream() instead.
+
+        Example:
+            ```python
+            # Get all results at once (not recommended for large datasets)
+            results = await model.get_all_results()
+            
+            # Get results with progress bar (not recommended for large datasets)
+            results = await model.get_all_results(total=100)
+            ```
+        """
         pbar = None
         output_frames = []
         async for data in self.model.result_stream():
