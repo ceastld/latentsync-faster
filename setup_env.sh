@@ -36,3 +36,4 @@ ln -s $(pwd)/checkpoints/auxiliary/vgg16-397923af.pth ~/.cache/torch/hub/checkpo
 
 # download vae model
 python -c "from diffusers import AutoencoderTiny; vae = AutoencoderTiny.from_pretrained('madebyollin/taesd')"
+python -c "from diffusers import AutoencoderKL; vae = AutoencoderKL.from_pretrained('stabilityai/sd-vae-ft-mse')"

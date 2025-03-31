@@ -7,6 +7,10 @@
 
 </div>
 
+## 📝 项目简介
+
+LatentSync 是一个先进的唇形同步（Lip Sync）AI 工具，能够将输入视频中的人脸口型与目标音频进行智能同步。通过深度学习技术，系统可以自动分析音频内容，生成与之匹配的口型动作，实现自然的音视频同步效果。
+
 ## 🚀 快速开始
 
 ### 环境配置
@@ -16,37 +20,10 @@
 source setup_env.sh
 ```
 
-## 🐳 Docker 部署
+### 文档
 
-项目提供两种 Docker 部署方式：
-
-### 方式一：使用 Docker Compose（推荐）
-
-```bash
-# 安装必要工具
-sudo apt-get install -y nvidia-container-toolkit
-sudo apt install docker-compose-plugin
-
-# 构建并启动容器
-docker compose up -d
-
-# 进入容器
-docker compose exec latentsync bash
-
-# 停止容器
-docker compose down
-```
-
-### 方式二：使用传统 Docker 命令
-
-```bash
-# 构建镜像
-sudo apt-get install -y nvidia-container-toolkit
-docker build -t latentsync .
-
-# 运行容器
-docker run -it --gpus all -v $(pwd):/app -w /app latentsync
-```
+- 详细的 Docker 部署说明请参考： [Docker 部署指南](doc/docker.md)
+- 并行推理方法请查看： [使用指南](doc/usage.md)
 
 ## 📦 模型资源
 
