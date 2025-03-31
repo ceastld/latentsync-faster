@@ -14,6 +14,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from latentsync.utils.frame_preprocess import process_frame
+
 
 def print_pt(path):
     data = torch.load(path)
@@ -291,86 +293,10 @@ class VideoReader:
             frame = self.read_frame()
             if frame is None:
                 break
-            # 调整到720p
-            # frame = self._resize_to_720p(frame)
-            # 降低图像质量并添加噪点
-            # frame = self._degrade_image_quality(frame)
+            # 处理图像
+            # frame = process_frame(frame)
             frames.append(frame)
         return frames
-
-    def _resize_to_720p(self, frame: np.ndarray) -> np.ndarray:
-        """将图像调整为720p大小，保持宽高比，不足部分用黑色填充
-        
-        Args:
-            frame: 输入图像，RGB格式
-            
-        Returns:
-            调整后的图像，RGB格式
-        """
-        target_height = 720
-        target_width = 1280  # 16:9比例
-        
-        # 获取原始尺寸
-        h, w = frame.shape[:2]
-        
-        # 计算缩放比例
-        scale = min(target_height / h, target_width / w)
-        
-        # 计算新的尺寸
-        new_h = int(h * scale)
-        new_w = int(w * scale)
-        
-        # 缩放图像
-        resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-        
-        # 创建黑色背景
-        result = np.zeros((target_height, target_width, 3), dtype=np.uint8)
-        
-        # 计算居中位置
-        y_offset = (target_height - new_h) // 2
-        x_offset = (target_width - new_w) // 2
-        
-        # 将缩放后的图像放在黑色背景中央
-        result[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
-        
-        return result
-
-    def _degrade_image_quality(self, frame: np.ndarray) -> np.ndarray:
-        """降低图像质量并添加噪点，模拟真实场景中的图像退化
-        
-        Args:
-            frame: 输入图像，RGB格式
-            
-        Returns:
-            处理后的图像，RGB格式
-        """
-        # 1. 降低分辨率再放大，模拟压缩失真
-        h, w = frame.shape[:2]
-        scale_factor = 0.5 # 随机降低到50%-80%
-        small_h = int(h * scale_factor)
-        small_w = int(w * scale_factor)
-        frame = cv2.resize(frame, (small_w, small_h), interpolation=cv2.INTER_LINEAR)
-        frame = cv2.resize(frame, (w, h), interpolation=cv2.INTER_LINEAR)
-        
-        # 2. 添加高斯噪点
-        noise = np.random.normal(0, 0.5, frame.shape).astype(np.uint8)
-        frame = cv2.add(frame, noise)
-        
-        # 3. 添加椒盐噪点
-        salt_pepper_ratio = np.random.uniform(0.001, 0.003)
-        noise_mask = np.random.random(frame.shape[:2]) < salt_pepper_ratio / 2
-        frame[noise_mask] = 0
-        noise_mask = np.random.random(frame.shape[:2]) < salt_pepper_ratio / 2
-        frame[noise_mask] = 0
-        
-        # 5. 添加轻微模糊
-        kernel_size = np.random.choice([3, 5])
-        frame = cv2.GaussianBlur(frame, (kernel_size, kernel_size), 0)
-        
-        # 确保像素值在有效范围内
-        frame = np.clip(frame, 0, 255).astype(np.uint8)
-        
-        return frame
 
     def release(self):
         self.cap.release()

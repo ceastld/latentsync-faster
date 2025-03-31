@@ -11,6 +11,7 @@ from latentsync.utils.affine_transform import AlignRestore
 from latentsync.utils.face_processor import FaceProcessor
 from latentsync.utils.timer import Timer
 from latentsync.utils.video import VideoReader, save_frames_to_video
+from latentsync.utils.frame_preprocess import process_frames
 
 
 class LipsyncModel:
@@ -102,6 +103,9 @@ class LipsyncModel:
         video_path: str,
         audio_path: str,
         output_path: str,
+        is_compress: bool = False,
+        is_noise: bool = False,
+        is_blur: bool = False,
     ):
         context = self.context
         batch_size = context.num_frames
@@ -132,6 +136,7 @@ class LipsyncModel:
         while frame_idx < total_frames:
             batch_metadata = []
             frames_batch = video_reader.read_batch(min(batch_size, total_frames - frame_idx))
+            frames_batch = process_frames(frames_batch, is_compress=is_compress, is_noise=is_noise, is_blur=is_blur)
             batch_metadata = face_processor.prepare_face_batch(frames_batch)
             if not batch_metadata:
                 break

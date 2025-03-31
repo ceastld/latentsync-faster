@@ -64,8 +64,9 @@ def main():
         # 生成输出文件名
         video_name = Path(video_path).stem
         audio_name = Path(audio_path).stem
-        output_name = f"{video_name}_v15.mp4"
+        output_name = f"{video_name}_v15_resize.mp4"
         output_path = os.path.join(GLOBAL_CONFIG.output_dir, output_name)
+        # audio_path = "testset/silence.mp3"
         
         # 处理文件对
         process_pair(video_path, audio_path, output_path)
