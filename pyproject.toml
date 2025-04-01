@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
-    {name = "LatentSync Team"}
+    {name = "Pinch"}
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -56,8 +56,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Pinch-Research/latentsync"
-Repository = "https://github.com/Pinch-Research/latentsync.git"
+Homepage = "https://github.com/pinch-eng/latentsync"
+Repository = "https://github.com/pinch-eng/latentsync.git"
 
 [project.scripts]
 latentsync-infer = "latentsync.inference.face_infer:main"
