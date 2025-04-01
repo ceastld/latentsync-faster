@@ -6,7 +6,7 @@ import onnxruntime as ort
 from typing import List, Optional, Tuple, Union
 
 from latentsync.utils.timer import Timer
-from latentsync.configs.config import GLOBAL_CONFIG
+from latentsync.configs.config import GLOBAL_CONFIG, LipsyncConfig
 
 from .utils.box_utils import hard_nms
 
@@ -14,7 +14,7 @@ from .utils.box_utils import hard_nms
 class FaceLandmarkDetector:
     """统一的人脸关键点检测接口"""
 
-    def __init__(self, device: str = "cuda"):
+    def __init__(self, device: str = "cuda", config: LipsyncConfig = None):
         """
         初始化人脸关键点检测器
 
@@ -24,8 +24,9 @@ class FaceLandmarkDetector:
             landmark_detector_path: 关键点检测器模型路径，如果为None则使用默认路径
         """
         self.device = device
-        self.face_detector_path = GLOBAL_CONFIG.face_detector_path
-        self.landmark_detector_path = GLOBAL_CONFIG.landmark_detector_path
+        config = config or GLOBAL_CONFIG.lipsync
+        self.face_detector_path = config.face_detector_path
+        self.landmark_detector_path = config.landmark_detector_path
 
         # 初始化ONNX检测器
         self._init_onnx_detector()

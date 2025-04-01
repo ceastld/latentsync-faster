@@ -8,55 +8,15 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).parent.parent.parent
 CHECKPOINT_DIR = str(ROOT_DIR / "checkpoints")
 ASSETS_DIR = str(ROOT_DIR / "assets")
-CONFIG_DIR = os.path.dirname(__file__)
 OUTPUT_DIR = str(ROOT_DIR / "output")
 TEST_DIR = str(ROOT_DIR / "testset")
 
 
 class Config:
-    config_dir = CONFIG_DIR
     checkpoint_dir = CHECKPOINT_DIR
     assets_dir = ASSETS_DIR
     output_dir = OUTPUT_DIR
     test_dir = TEST_DIR
-    def get_config_path(self, *sub_path):
-        return os.path.join(self.config_dir, *sub_path)
-
-    @cached_property
-    def unet_config(self):
-        return OmegaConf.load(self.get_config_path("unet/stage2_v1.yaml"))
-
-    @cached_property
-    def unet_config_v15(self):
-        return OmegaConf.load(self.get_config_path("unet/stage2_v15.yaml"))
-
-    @cached_property
-    def audio_config(self):
-        return OmegaConf.load(self.get_config_path("audio.yaml"))
-
-    @cached_property
-    def scheduler_config(self):
-        return OmegaConf.load(self.get_config_path("scheduler_config.json"))
-
-    @cached_property
-    def whisper_model_path(self):
-        return os.path.join(CHECKPOINT_DIR, "whisper/tiny.pt")
-
-    @cached_property
-    def latentsync_unet_path(self):
-        return os.path.join(CHECKPOINT_DIR, "latentsync_unet.pt")
-
-    @cached_property
-    def latentsync_unet_path_v15(self):
-        return os.path.join(CHECKPOINT_DIR, "v15", "latentsync_unet.pt")
-
-    @cached_property
-    def face_detector_path(self):
-        return os.path.join(CHECKPOINT_DIR, "face/face_detector_fixed.onnx")
-
-    @cached_property
-    def landmark_detector_path(self):
-        return os.path.join(CHECKPOINT_DIR, "face/landmark_detector_fixed.onnx")
     
     @cached_property
     def mask_image_path(self):
@@ -65,10 +25,6 @@ class Config:
     @cached_property
     def lipsync(self):
         return LipsyncConfig()
-
-    @cached_property
-    def lipsync_v15(self):
-        return LipsyncConfig_v15()
 
     @cached_property
     def inference(self):
@@ -101,9 +57,52 @@ class LipsyncConfig:
     seed = 1247
     vae_type = "tiny"
     
+    def __init__(self, checkpoint_dir: str = None) -> None:
+        self.checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
+        self.config_dir = os.path.dirname(__file__)
+    
+    def get_config_path(self, *sub_path):
+        return os.path.join(self.config_dir, *sub_path)
+    
+    @cached_property
+    def unet_config(self):
+        return OmegaConf.load(self.get_config_path("unet/stage2_v1.yaml"))
+
+    @cached_property
+    def audio_config(self):
+        return OmegaConf.load(self.get_config_path("audio.yaml"))
+
+    @cached_property
+    def scheduler_config(self):
+        return OmegaConf.load(self.get_config_path("scheduler_config.json"))
+    
+    @cached_property
+    def whisper_model_path(self):
+        return os.path.join(self.checkpoint_dir, "whisper/tiny.pt")    
+    
+    @cached_property
+    def latentsync_unet_path(self):
+        return os.path.join(self.checkpoint_dir, "latentsync_unet.pt")
+    
+    @cached_property
+    def face_detector_path(self):
+        return os.path.join(self.checkpoint_dir, "face/face_detector_fixed.onnx")
+    
+    @cached_property
+    def landmark_detector_path(self):
+        return os.path.join(self.checkpoint_dir, "face/landmark_detector_fixed.onnx")
+    
 class LipsyncConfig_v15(LipsyncConfig):
     num_frames = 16
     vae_type = "kl"
+
+    @cached_property
+    def unet_config(self):
+        return OmegaConf.load(self.get_config_path("unet/stage2_v15.yaml"))
+
+    @cached_property
+    def latentsync_unet_path(self):
+        return os.path.join(self.checkpoint_dir, "v15", "latentsync_unet.pt")
 
 @dataclass
 class InferPackage:
@@ -157,6 +156,6 @@ class InferenceConfig:
 GLOBAL_CONFIG = Config()
 
 if __name__ == "__main__":
-    print(GLOBAL_CONFIG.whisper_model_path)
-    print(GLOBAL_CONFIG.inference.default_audio_path)
-    print(GLOBAL_CONFIG.lipsync.num_frames)
+    config = LipsyncConfig_v15()
+    print(config.audio_sample_rate)
+    

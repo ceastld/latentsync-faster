@@ -1,5 +1,5 @@
 from tqdm import tqdm
-from latentsync.configs.config import GLOBAL_CONFIG
+from latentsync.configs.config import GLOBAL_CONFIG, LipsyncConfig
 from latentsync.face_detection import FaceLandmarkDetector
 from latentsync.pipelines.metadata import LipsyncMetadata
 from latentsync.utils.affine_transform import AlignRestore, laplacianSmooth
@@ -15,12 +15,12 @@ from latentsync.utils.video import VideoReader
 class FaceProcessor:
     """Class for face detection and affine transformation operations"""
 
-    def __init__(self, resolution: int = 512, device: str = "cpu"):
+    def __init__(self, resolution: int = 512, device: str = "cpu", config: LipsyncConfig = None):
         self.resolution = resolution
         self.device = device
         self.smoother = laplacianSmooth()
         self.restorer = AlignRestore()
-        self.face_detector = FaceLandmarkDetector(device=self.device)
+        self.face_detector = FaceLandmarkDetector(device=self.device, config=config)
 
     @torch.no_grad()
     def affine_transform(self, image: np.ndarray) -> Tuple[torch.Tensor, list, np.ndarray]:

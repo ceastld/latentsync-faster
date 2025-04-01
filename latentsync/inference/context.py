@@ -1,9 +1,8 @@
 from accelerate.utils import set_seed as acc_seed
-from latentsync.configs.config import GLOBAL_CONFIG, LipsyncConfig
+from latentsync.configs.config import CHECKPOINT_DIR, LipsyncConfig, LipsyncConfig_v15
 import torch
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Union
-from functools import cached_property
 from omegaconf import OmegaConf
 from diffusers import AutoencoderTiny, AutoencoderKL, DPMSolverMultistepScheduler
 from diffusers.utils.import_utils import is_xformers_available
@@ -54,8 +53,11 @@ class LipsyncContext:
         seed: int = None,
         # VAE selection
         vae_type: Optional[str] = None,
+        checkpoint_dir: str = None,
     ):
-        config = self.config
+        checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
+        self.config = config = self.get_config(checkpoint_dir)
+        
         # Basic parameters
         self.audio_sample_rate = audio_sample_rate or config.audio_sample_rate
         self.video_fps = video_fps or config.video_fps
@@ -98,9 +100,8 @@ class LipsyncContext:
         # Post initialization
         self._post_init()
 
-    @property
-    def config(self) -> LipsyncConfig:
-        return GLOBAL_CONFIG.lipsync
+    def get_config(self, checkpoint_dir: str) -> LipsyncConfig:
+        return LipsyncConfig(checkpoint_dir)
 
     def _post_init(self):
         # Set do_classifier_free_guidance based on guidance_scale
@@ -116,7 +117,7 @@ class LipsyncContext:
     def create_audio_encoder(self) -> Audio2Feature:
         """Create audio encoder for processing audio samples"""
         return Audio2Feature(
-            model_path=GLOBAL_CONFIG.whisper_model_path,
+            model_path=self.config.whisper_model_path,
             device=self.device,
             num_frames=self.num_frames,
         )
@@ -129,8 +130,8 @@ class LipsyncContext:
             return self.create_unet_onnx()
         else:
             unet, _ = UNet3DConditionModel.from_pretrained(
-                OmegaConf.to_container(GLOBAL_CONFIG.unet_config.model),
-                GLOBAL_CONFIG.latentsync_unet_path,
+                OmegaConf.to_container(self.config.unet_config.model),
+                self.config.latentsync_unet_path,
                 device=self.device,
             )
             if is_xformers_available():
@@ -143,7 +144,7 @@ class LipsyncContext:
         from latentsync.models.onnx_wrapper import ONNXModelWrapper
 
         # Build ONNX model path - use same name but with .onnx suffix
-        onnx_path = os.path.join(os.path.dirname(GLOBAL_CONFIG.latentsync_unet_path_v15), "unet.onnx")
+        onnx_path = os.path.join(os.path.dirname(self.config.latentsync_unet_path_v15), "unet.onnx")
 
         # Check if ONNX model exists
         if not os.path.exists(onnx_path):
@@ -163,7 +164,7 @@ class LipsyncContext:
         from latentsync.models.trt_wrapper import TRTModelWrapper
 
         # Build TensorRT engine path - use same name but with .engine suffix
-        engine_path = os.path.join(os.path.dirname(GLOBAL_CONFIG.latentsync_unet_path_v15), "latentsync_unet.engine")
+        engine_path = os.path.join(os.path.dirname(self.config.latentsync_unet_path_v15), "latentsync_unet.engine")
 
         # Check if TensorRT engine exists
         if not os.path.exists(engine_path):
@@ -201,7 +202,7 @@ class LipsyncContext:
         """Create diffusion scheduler"""
         self.num_inference_steps = 2
         return DPMSolverMultistepScheduler.from_pretrained(
-            GLOBAL_CONFIG.config_dir,
+            self.config.config_dir,
             algorithm_type="dpmsolver++",
             solver_order=2,
             # use_karras_sigmas=True,
@@ -226,15 +227,14 @@ class LipsyncContext:
             raise ValueError(f"Invalid version: {version}")
 
 class LipsyncContext_v15(LipsyncContext):
-    @property
-    def config(self) -> LipsyncConfig:
-        return GLOBAL_CONFIG.lipsync_v15
+    def get_config(self, checkpoint_dir: str) -> LipsyncConfig_v15:
+        return LipsyncConfig_v15(checkpoint_dir)
 
     def create_unet(self) -> UNet3DConditionModel_v15:
         """Create UNet model for diffusion"""
         unet, _ = UNet3DConditionModel_v15.from_pretrained(
-            OmegaConf.to_container(GLOBAL_CONFIG.unet_config_v15.model),
-            GLOBAL_CONFIG.latentsync_unet_path_v15,
+            OmegaConf.to_container(self.config.unet_config.model),
+            self.config.latentsync_unet_path,
             device=self.device,
         )
         return unet.eval().to(dtype=self.weight_dtype)
