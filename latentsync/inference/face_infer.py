@@ -14,7 +14,7 @@ class FaceInference(MultiThreadInference):
         self.context = context
 
     def get_model(self):
-        return FaceProcessor(self.context.resolution, self.context.device)
+        return self.context.create_face_processor()
     
     def infer_task(self, model: FaceProcessor, image: np.ndarray):
         return model.prepare_face(image)

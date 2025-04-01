@@ -19,7 +19,7 @@ setup(
     python_requires=">=3.8",
     packages=find_packages(include=["latentsync*"]),
     package_data={
-        "latentsync": ["configs/*.yaml", "configs/*.json", "utils/*.png"]
+        "latentsync": ["**/*"]
     },
     install_requires=[
         "torch>=2.2.1",

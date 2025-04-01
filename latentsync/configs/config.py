@@ -17,7 +17,7 @@ class Config:
     assets_dir = ASSETS_DIR
     output_dir = OUTPUT_DIR
     test_dir = TEST_DIR
-    
+
     @cached_property
     def mask_image_path(self):
         return os.path.join(ROOT_DIR, "latentsync/utils/mask.png")
@@ -56,14 +56,14 @@ class LipsyncConfig:
     eta = 0.0
     seed = 1247
     vae_type = "tiny"
-    
+
     def __init__(self, checkpoint_dir: str = None) -> None:
         self.checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
         self.config_dir = os.path.dirname(__file__)
-    
+
     def get_config_path(self, *sub_path):
         return os.path.join(self.config_dir, *sub_path)
-    
+
     @cached_property
     def unet_config(self):
         return OmegaConf.load(self.get_config_path("unet/stage2_v1.yaml"))
@@ -75,23 +75,24 @@ class LipsyncConfig:
     @cached_property
     def scheduler_config(self):
         return OmegaConf.load(self.get_config_path("scheduler_config.json"))
-    
+
     @cached_property
     def whisper_model_path(self):
-        return os.path.join(self.checkpoint_dir, "whisper/tiny.pt")    
-    
+        return os.path.join(self.checkpoint_dir, "whisper/tiny.pt")
+
     @cached_property
     def latentsync_unet_path(self):
         return os.path.join(self.checkpoint_dir, "latentsync_unet.pt")
-    
+
     @cached_property
     def face_detector_path(self):
         return os.path.join(self.checkpoint_dir, "face/face_detector_fixed.onnx")
-    
+
     @cached_property
     def landmark_detector_path(self):
         return os.path.join(self.checkpoint_dir, "face/landmark_detector_fixed.onnx")
-    
+
+
 class LipsyncConfig_v15(LipsyncConfig):
     num_frames = 16
     vae_type = "kl"
@@ -104,6 +105,7 @@ class LipsyncConfig_v15(LipsyncConfig):
     def latentsync_unet_path(self):
         return os.path.join(self.checkpoint_dir, "v15", "latentsync_unet.pt")
 
+
 @dataclass
 class InferPackage:
     video_path: str
@@ -112,6 +114,10 @@ class InferPackage:
 
 
 class InferenceConfig:
+    def __init__(self, assets_dir: str = None, output_dir: str = None):
+        self.assets_dir = assets_dir or ASSETS_DIR
+        self.output_dir = output_dir or OUTPUT_DIR
+
     @property
     def default_audio_path(self):
         return self.obama.audio_path
@@ -120,37 +126,28 @@ class InferenceConfig:
     def default_video_path(self):
         return self.obama.video_path
 
+    def create_demo(self, video_path: str, audio_path: str, video_out_path: str):
+        return InferPackage(
+            video_path=os.path.join(self.assets_dir, video_path),
+            audio_path=os.path.join(self.assets_dir, audio_path),
+            video_out_path=os.path.join(self.output_dir, video_out_path),
+        )
+
     @cached_property
     def obama(self):
-        return InferPackage(
-            video_path=os.path.join(ASSETS_DIR, "obama.mp4"),
-            audio_path=os.path.join(ASSETS_DIR, "cxk.mp3"),
-            video_out_path=os.path.join(OUTPUT_DIR, "obama_cxk.mp4"),
-        )
+        return self.create_demo("obama.mp4", "cxk.mp3", "obama_cxk.mp4")
 
     @cached_property
     def obama_top(self):
-        return InferPackage(
-            video_path=os.path.join(ASSETS_DIR, "obama_top.mp4"),
-            audio_path=os.path.join(ASSETS_DIR, "cxk.mp3"),
-            video_out_path=os.path.join(OUTPUT_DIR, "obama_cxk_top.mp4"),
-        )
+        return self.create_demo("obama_top.mp4", "cxk.mp3", "obama_cxk_top.mp4")
 
     @cached_property
     def obama1(self):
-        return InferPackage(
-            video_path=os.path.join(ASSETS_DIR, "obama1.mp4"),
-            audio_path=os.path.join(ASSETS_DIR, "cxk.mp3"),
-            video_out_path=os.path.join(OUTPUT_DIR, "obama_cxk1.mp4"),
-        )
+        return self.create_demo("obama1.mp4", "cxk.mp3", "obama_cxk1.mp4")
 
     @property
     def demo1(self):
-        return InferPackage(
-            video_path=os.path.join(ASSETS_DIR, "demo1_video.mp4"),
-            audio_path=os.path.join(ASSETS_DIR, "demo1_audio.wav"),
-            video_out_path=os.path.join(OUTPUT_DIR, "demo1_out.mp4"),
-        )
+        return self.create_demo("demo1_video.mp4", "demo1_audio.wav", "demo1_out.mp4")
 
 
 GLOBAL_CONFIG = Config()
@@ -158,4 +155,3 @@ GLOBAL_CONFIG = Config()
 if __name__ == "__main__":
     config = LipsyncConfig_v15()
     print(config.audio_sample_rate)
-    

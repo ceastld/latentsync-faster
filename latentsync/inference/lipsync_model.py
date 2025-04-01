@@ -8,7 +8,6 @@ from latentsync.inference.context import LipsyncContext
 from latentsync.inference.utils import align_audio_features, create_diffusion_pipeline, load_audio_clips
 from latentsync.pipelines.metadata import LipsyncMetadata
 from latentsync.utils.affine_transform import AlignRestore
-from latentsync.utils.face_processor import FaceProcessor
 from latentsync.utils.timer import Timer
 from latentsync.utils.video import VideoReader, save_frames_to_video
 from latentsync.utils.frame_preprocess import process_frames

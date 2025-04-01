@@ -7,6 +7,7 @@ from omegaconf import OmegaConf
 from diffusers import AutoencoderTiny, AutoencoderKL, DPMSolverMultistepScheduler
 from diffusers.utils.import_utils import is_xformers_available
 from latentsync.models.unet import UNet3DConditionModel
+from latentsync.utils.face_processor import FaceProcessor
 from latentsync.whisper.audio2feature import Audio2Feature
 from latentsync.models_v15.unet import UNet3DConditionModel as UNet3DConditionModel_v15
 
@@ -57,7 +58,7 @@ class LipsyncContext:
     ):
         checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
         self.config = config = self.get_config(checkpoint_dir)
-        
+
         # Basic parameters
         self.audio_sample_rate = audio_sample_rate or config.audio_sample_rate
         self.video_fps = video_fps or config.video_fps
@@ -91,12 +92,12 @@ class LipsyncContext:
         self.use_onnx = use_onnx
         self.use_trt = use_trt
         self.seed = seed or config.seed
-        
+
         # VAE selection
         self.vae_type = (vae_type or config.vae_type).lower()
         if self.vae_type not in ["tiny", "kl"]:
             raise ValueError("vae_type must be either 'tiny' or 'kl'")
-            
+
         # Post initialization
         self._post_init()
 
@@ -110,7 +111,7 @@ class LipsyncContext:
         # Ensure only one model type is selected
         if sum([self.use_compile, self.use_onnx, self.use_trt]) > 1:
             raise ValueError("Only one of use_compile, use_onnx, or use_trt can be True at the same time")
-        
+
         if self.seed is not None:
             set_seed(self.seed)
 
@@ -184,7 +185,7 @@ class LipsyncContext:
             return self.create_vae_tiny()
         else:  # kl
             return self.create_vae_kl()
-    
+
     def create_vae_tiny(self) -> AutoencoderTiny:
         """Create VAE model for encoding/decoding images"""
         vae = AutoencoderTiny.from_pretrained("madebyollin/taesd", torch_dtype=self.weight_dtype)
@@ -208,11 +209,18 @@ class LipsyncContext:
             # use_karras_sigmas=True,
         )
 
+    def create_face_processor(self) -> FaceProcessor:
+        return FaceProcessor(
+            resolution=self.resolution,
+            device=self.device,
+            config=self.config,
+        )
+
     @classmethod
     def from_dict(cls, config_dict: dict) -> "LipsyncContext":
         """Create context from dictionary"""
         return cls(**config_dict)
-    
+
     @staticmethod
     def from_version(version: str, **kwargs) -> "LipsyncContext":
         """
@@ -225,6 +233,7 @@ class LipsyncContext:
             return LipsyncContext(**kwargs)
         else:
             raise ValueError(f"Invalid version: {version}")
+
 
 class LipsyncContext_v15(LipsyncContext):
     def get_config(self, checkpoint_dir: str) -> LipsyncConfig_v15:

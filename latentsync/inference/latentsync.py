@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 from functools import cached_property
+import os
 from typing import List, Set, Union
 
 import cv2
@@ -175,8 +176,8 @@ class LatentSync:
         ```
     """
 
-    def __init__(self, version=None, enable_progress=False, video_fps: int = 25, worker_timeout: int = 60, num_frames: int = None):
-        self.context = LipsyncContext.from_version(version, num_frames=num_frames)
+    def __init__(self, version=None, enable_progress=False, video_fps: int = 25, worker_timeout: int = 60, num_frames: int = None, checkpoint_dir: str = None):
+        self.context = LipsyncContext.from_version(version, num_frames=num_frames, checkpoint_dir=checkpoint_dir)
         self.enable_progress = enable_progress
         self.video_fps = video_fps
         self.model = LatentSyncInference(
@@ -224,6 +225,8 @@ class LatentSync:
             raise ValueError(f"Invalid frame type: {type(frame)}")
         
     def push_img_and_audio(self, image_path: str, audio_path: str):
+        assert os.path.exists(image_path), f"Image file {image_path} does not exist"
+        assert os.path.exists(audio_path), f"Audio file {audio_path} does not exist"
         audio_clips = load_audio_clips(audio_path, self.context.samples_per_frame)
         frame = cv2.imread(image_path)
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -267,6 +270,8 @@ class LatentSync:
             This method creates an asynchronous task for video streaming.
             The video will be processed frame by frame at the specified FPS.
         """
+        assert os.path.exists(video_path), f"Video file {video_path} does not exist"
+        assert os.path.exists(audio_path), f"Audio file {audio_path} does not exist"
         self.model.create_task(self._push_video_streaming(video_path, audio_path, max_frames, fps))
 
     async def _push_video_streaming(self, video_path, audio_path, max_frames: int = None, fps: int = 30):
