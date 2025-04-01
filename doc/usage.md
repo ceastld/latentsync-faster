@@ -22,7 +22,7 @@ from latentsync import LatentSync
 
 async def example():
     # Initialize model
-    model = LatentSync(version="v15")
+    model = LatentSync()
     
     # Push frames
     frame = cv2.imread("input.jpg")
@@ -35,7 +35,7 @@ async def example():
     model.push_audio(audio_data)
     
     # Mark end of input
-    model.model.add_end_task()
+    model.add_end_task()
     
     # Stream results
     frames = []

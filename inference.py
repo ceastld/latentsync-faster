@@ -28,3 +28,4 @@ if __name__ == "__main__":
     main(args)
     Timer.summary()
     print(f"Output video path: {args.video_out_path}")
+

@@ -189,6 +189,10 @@ class LatentSync:
     def stop_workers(self):
         """Stop all worker processes."""
         self.model.stop_workers()
+        
+    def add_end_task(self):
+        """Add an end task to the processing pipeline."""
+        self.model.add_end_task()
 
     def push_frames(self, frame: Union[np.ndarray, List[np.ndarray]]):
         """Push one or more frames to the processing pipeline.
