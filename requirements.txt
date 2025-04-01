@@ -1,3 +1,7 @@
+--find-links https://download.pytorch.org/whl/cu124
+torch>=2.2.1+cu124
+torchvision>=0.17.1+cu124
+torchaudio>=2.2.1+cu124
 accelerate==1.4.0
 decord==0.6.0
 diffusers==0.32.2

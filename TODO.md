@@ -14,34 +14,3 @@
 
 * TODO: 优化没有识别到人脸情况下的输出，直接输出原始图片
 * pose 变化就不处理，
-
-# speed test
-* ori var and unet
-```
-prepare_face_batch:
-  Calls: 25
-  Avg time (trimmed): 90.70ms
-
-process_batch:
-  Calls: 25
-  Avg time (trimmed): 372.00ms
-
-restore_batch:
-  Calls: 25
-  Avg time (trimmed): 77.27ms
-```
-
-* torch.compile unet and vae
-```
-prepare_face_batch:
-  Calls: 25
-  Avg time (trimmed): 92.52ms
-
-process_batch:
-  Calls: 25
-  Avg time (trimmed): 318.16ms
-
-restore_batch:
-  Calls: 25
-  Avg time (trimmed): 79.58ms
-```

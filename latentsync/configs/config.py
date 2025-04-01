@@ -57,6 +57,10 @@ class Config:
     @cached_property
     def landmark_detector_path(self):
         return os.path.join(CHECKPOINT_DIR, "face/landmark_detector_fixed.onnx")
+    
+    @cached_property
+    def mask_image_path(self):
+        return os.path.join(ROOT_DIR, "latentsync/utils/mask.png")
 
     @cached_property
     def lipsync(self):

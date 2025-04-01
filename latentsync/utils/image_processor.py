@@ -6,7 +6,7 @@ from typing import Optional, Union
 from latentsync.utils.timer import Timer
 from PIL import Image
 import torchvision.transforms.functional as TF
-
+from latentsync.configs.config import GLOBAL_CONFIG
 """
 If you are enlarging the image, you should prefer to use INTER_LINEAR or INTER_CUBIC interpolation. If you are shrinking the image, you should prefer to use INTER_AREA interpolation.
 https://stackoverflow.com/questions/23853632/which-kind-of-interpolation-best-for-resizing-image
@@ -14,7 +14,7 @@ https://stackoverflow.com/questions/23853632/which-kind-of-interpolation-best-fo
 
 
 def load_fixed_mask(resolution: int) -> torch.Tensor:
-    mask_image = Image.open("latentsync/utils/mask.png").convert("RGB")
+    mask_image = Image.open(GLOBAL_CONFIG.mask_image_path).convert("RGB")
     mask_image = mask_image.resize((resolution, resolution), Image.Resampling.LANCZOS)
     mask_image = TF.to_tensor(mask_image)
     return mask_image
