@@ -46,3 +46,4 @@ wandb/
 *.egg-info/
 .gradio/
 test.py
+build/

@@ -39,7 +39,7 @@ Example:
     ```
 """
 
-__version__ = "0.1.0" 
+__version__ = "0.1.1" 
 
 from latentsync.inference.utils import create_pipeline
 from latentsync.inference.latentsync import LatentSync
