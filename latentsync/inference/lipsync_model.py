@@ -102,9 +102,6 @@ class LipsyncModel:
         video_path: str,
         audio_path: str,
         output_path: str,
-        is_compress: bool = False,
-        is_noise: bool = False,
-        is_blur: bool = False,
     ):
         context = self.context
         batch_size = context.num_frames
@@ -135,7 +132,7 @@ class LipsyncModel:
         while frame_idx < total_frames:
             batch_metadata = []
             frames_batch = video_reader.read_batch(min(batch_size, total_frames - frame_idx))
-            frames_batch = process_frames(frames_batch, is_compress=is_compress, is_noise=is_noise, is_blur=is_blur)
+            frames_batch = process_frames(frames_batch)
             batch_metadata = face_processor.prepare_face_batch(frames_batch)
             if not batch_metadata:
                 break
