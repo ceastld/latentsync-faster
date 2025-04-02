@@ -319,3 +319,15 @@ class VideoReader:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
+
+
+
+def extract_all_frames(video_path, out_img_dir, fps=25, ext=".jpg"):
+    cap_vid = cv2.VideoCapture(video_path)
+    video_width = int(cap_vid.get(cv2.CAP_PROP_FRAME_WIDTH))
+    video_height = int(cap_vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    os.makedirs(out_img_dir, exist_ok=True)
+    resize_option = f"-s {video_width // 2 * 2}x{video_height // 2 * 2}" if (video_width % 2 == 1 or video_height % 2 == 1) else ""
+    ffmpeg_cmd = f"ffmpeg -loglevel error -y -i {video_path} {resize_option} -q:v 1 -vf 'fps={fps}' -start_number 0 {out_img_dir}/%06d{ext}"
+    # os.system(ffmpeg_cmd)
+    subprocess.run(ffmpeg_cmd, shell=True)
