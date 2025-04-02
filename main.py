@@ -26,7 +26,7 @@ async def test():
 async def main(max_frames: int = None):
     model = LatentSync(version="v15", enable_progress=False)
     print(model.context.num_inference_steps)
-    example = GLOBAL_CONFIG.inference.demo_large_pose
+    example = GLOBAL_CONFIG.inference.obama
     model.push_video_stream(example.video_path, example.audio_path, max_frames, fps=25)
     results = await model.get_all_results()
     logger.info(f"Results: {len(results)}")

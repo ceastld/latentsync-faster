@@ -37,7 +37,7 @@ setup(
         "decord>=0.6.0",
         "diffusers>=0.32.2",
         "einops>=0.8.1",
-        "face_alignment>=1.4.1",
+        "insightface>=0.7.0",
         "ffmpeg_python>=0.2.0",
         "imageio>=2.37.0",
         "librosa>=0.10.2",
