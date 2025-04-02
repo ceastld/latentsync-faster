@@ -1,12 +1,20 @@
 from setuptools import setup, find_packages
 import os
+import re
 
 # Read version from latentsync/__init__.py
 def read_version():
     version_file = os.path.join(os.path.dirname(__file__), "latentsync", "__init__.py")
-    with open(version_file, "r") as f:
-        exec(f.read(), globals())
-    return globals()["__version__"]
+    try:
+        with open(version_file, "r") as f:
+            content = f.read()
+            # Match __version__ = "x.y.z" or __version__ = 'x.y.z'
+            version_match = re.search(r"^__version__\s*=\s*['\"]([^'\"]+)['\"]", content, re.M)
+            if version_match:
+                return version_match.group(1)
+            raise RuntimeError("Unable to find version string in %s" % version_file)
+    except Exception as e:
+        raise RuntimeError("Failed to read version from %s: %s" % (version_file, str(e)))
 
 setup(
     name="latentsync",
