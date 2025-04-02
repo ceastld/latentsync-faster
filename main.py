@@ -25,11 +25,12 @@ async def test():
 
 async def main(max_frames: int = None):
     model = LatentSync(version="v15", enable_progress=False)
-    example = GLOBAL_CONFIG.inference.obama
+    print(model.context.num_inference_steps)
+    example = GLOBAL_CONFIG.inference.demo_large_pose
     model.push_video_stream(example.video_path, example.audio_path, max_frames, fps=25)
     results = await model.get_all_results()
     logger.info(f"Results: {len(results)}")
-    save_frames_to_video(results, example.video_out_path, audio_path=example.audio_path)
+    save_frames_to_video(results, example.video_out_path, audio_path=example.audio_path, save_images=True)
     print(f"Saved to {example.video_out_path}")
 
 

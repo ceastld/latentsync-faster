@@ -28,7 +28,7 @@ class Config:
 
     @cached_property
     def inference(self):
-        return InferenceConfig()
+        return InferenceConfig(assets_dir=ASSETS_DIR, output_dir=OUTPUT_DIR)
 
 
 def get_dtype():
@@ -114,9 +114,10 @@ class InferPackage:
 
 
 class InferenceConfig:
-    def __init__(self, assets_dir: str = None, output_dir: str = None):
-        self.assets_dir = assets_dir or ASSETS_DIR
-        self.output_dir = output_dir or OUTPUT_DIR
+    def __init__(self, assets_dir: str, output_dir: str):
+        assert os.path.exists(assets_dir), f"Assets directory {assets_dir} does not exist"
+        self.assets_dir = assets_dir
+        self.output_dir = output_dir
 
     @property
     def default_audio_path(self):
@@ -148,6 +149,10 @@ class InferenceConfig:
     @property
     def demo1(self):
         return self.create_demo("demo1_video.mp4", "demo1_audio.wav", "demo1_out.mp4")
+
+    @property
+    def demo_large_pose(self):
+        return self.create_demo("large_pose.mp4", "cxk.mp3", "large_pose_cxk.mp4")
 
 
 GLOBAL_CONFIG = Config()

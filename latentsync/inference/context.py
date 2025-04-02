@@ -201,7 +201,6 @@ class LipsyncContext:
 
     def create_scheduler(self) -> DPMSolverMultistepScheduler:
         """Create diffusion scheduler"""
-        self.num_inference_steps = 2
         return DPMSolverMultistepScheduler.from_pretrained(
             self.config.config_dir,
             algorithm_type="dpmsolver++",

@@ -136,6 +136,7 @@ class LatentSyncInference:
         self.face_model.add_end_task()
         self.audio_model.add_end_task()
 
+
 class LatentSync:
     """A class for lip-syncing videos using latent diffusion models.
 
@@ -153,20 +154,20 @@ class LatentSync:
         Manual frame and audio processing:
         ```python
         model = LatentSync(version="v15")
-        
+
         # Push frames
         frame = cv2.imread("input.jpg")
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         model.push_frames(frame)  # Single frame
         model.push_frames([frame] * 10)  # Multiple frames
-        
+
         # Push audio
         audio_data = load_audio("input.mp3")  # Your audio loading function
         model.push_audio(audio_data)
-        
+
         # Mark end of input
         model.model.add_end_task()
-        
+
         # Process results as they come in
         frames = []
         async for frame in model.result_stream():
@@ -176,8 +177,17 @@ class LatentSync:
         ```
     """
 
-    def __init__(self, version=None, enable_progress=False, video_fps: int = 25, worker_timeout: int = 60, num_frames: int = None, checkpoint_dir: str = None):
-        self.context = LipsyncContext.from_version(version, num_frames=num_frames, checkpoint_dir=checkpoint_dir)
+    def __init__(
+        self,
+        version=None,
+        enable_progress=False,
+        video_fps: int = 25,
+        worker_timeout: int = 60,
+        num_frames: int = None,
+        checkpoint_dir: str = None,
+        **kwargs,
+    ):
+        self.context = LipsyncContext.from_version(version, num_frames=num_frames, checkpoint_dir=checkpoint_dir, **kwargs)
         self.enable_progress = enable_progress
         self.video_fps = video_fps
         self.model = LatentSyncInference(
@@ -190,7 +200,7 @@ class LatentSync:
     def stop_workers(self):
         """Stop all worker processes."""
         self.model.stop_workers()
-        
+
     def add_end_task(self):
         """Add an end task to the processing pipeline."""
         self.model.add_end_task()
@@ -211,7 +221,7 @@ class LatentSync:
             frame = cv2.imread("input.jpg")
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             model.push_frames(frame)
-            
+
             # Multiple frames
             model.push_frames([frame] * 10)
             ```
@@ -223,14 +233,14 @@ class LatentSync:
                 self.model.push_face(f)
         else:
             raise ValueError(f"Invalid frame type: {type(frame)}")
-        
+
     def push_img_and_audio(self, image_path: str, audio_path: str):
         assert os.path.exists(image_path), f"Image file {image_path} does not exist"
         assert os.path.exists(audio_path), f"Audio file {audio_path} does not exist"
         audio_clips = load_audio_clips(audio_path, self.context.samples_per_frame)
         frame = cv2.imread(image_path)
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        self.push_frames([frame]*len(audio_clips))
+        self.push_frames([frame] * len(audio_clips))
         self.push_audio(audio_clips)
         self.model.add_end_task()
 
@@ -332,7 +342,7 @@ class LatentSync:
             ```python
             # Get all results at once (not recommended for large datasets)
             results = await model.get_all_results()
-            
+
             # Get results with progress bar (not recommended for large datasets)
             results = await model.get_all_results(total=100)
             ```

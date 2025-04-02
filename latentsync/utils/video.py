@@ -76,10 +76,11 @@ def save_frames_to_video(frames, out_path, audio_path=None, fps=25, save_images=
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_video_file = tempfile.NamedTemporaryFile("w", suffix=".mp4", dir=out_path.parent)
+    out_image_dir = None
     if save_images:
         out_image_dir = out_path.with_suffix("")
         out_image_dir.mkdir(exist_ok=True)
-    with LazyVideoWriter(tmp_video_file.name, fps=fps, save_images=save_images) as writer:
+    with LazyVideoWriter(tmp_video_file.name, fps=fps, save_images=save_images, image_dir=out_image_dir) as writer:
         for frame in frames:
             writer.write(frame)
     if audio_path is not None:
@@ -156,15 +157,16 @@ def data_to_numpy(data) -> Any:
 
 
 class LazyVideoWriter:
-    def __init__(self, save_path, fps=25.0, save_images=False):
+    def __init__(self, save_path, fps=25.0, save_images=False, image_dir=None):
         self.writer = None
         assert save_path.endswith(".mp4"), "Only support mp4 format"
         self.save_path = save_path
         self.save_images = save_images
         self.fps = fps
         if save_images:
-            self.image_dir = Path(save_path).with_suffix("")
+            self.image_dir = Path(image_dir) if image_dir is not None else Path(save_path).with_suffix("")
             self.image_dir.mkdir(exist_ok=True)
+        self.image_idx = 0
 
     def write(self, image: np.ndarray):
         if self.writer is None:
@@ -172,8 +174,9 @@ class LazyVideoWriter:
             self.writer = cv2.VideoWriter(self.save_path, cv2.VideoWriter_fourcc(*"mp4v"), self.fps, size)
         image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         if self.save_images:
-            image_path = self.image_dir / f"{self.writer.get(cv2.CAP_PROP_FRAME_COUNT):06d}.png"
+            image_path = self.image_dir / f"{self.image_idx:06d}.jpg"
             cv2.imwrite(str(image_path), image_bgr)
+            self.image_idx += 1
         self.writer.write(image_bgr)
 
     def release(self):
