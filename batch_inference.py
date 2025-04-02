@@ -1,12 +1,10 @@
 from latentsync import *
 from pathlib import Path
 import glob
-from typing import List, Tuple, Dict
+from typing import List, Tuple
 import os
 from latentsync.configs.config import GLOBAL_CONFIG
 import argparse
-from itertools import product
-import json
 
 def get_video_audio_pairs() -> List[Tuple[str, str]]:
     """获取testset文件夹中子目录中的视频和音频文件对
@@ -39,63 +37,36 @@ def get_video_audio_pairs() -> List[Tuple[str, str]]:
     
     return pairs
 
-def get_processing_patterns() -> List[Dict]:
-    """生成所有可能的处理模式组合
-    
-    Returns:
-        处理模式列表，每个模式包含compress、noise和blur三个布尔参数
-    """
-    # 定义参数范围
-    patterns = []
-    for compress, noise, blur in product([True, False], repeat=3):
-        pattern = {
-            'compress': compress,
-            'noise': noise,
-            'blur': blur,
-            'name': f'c{int(compress)}_n{int(noise)}_b{int(blur)}'
-        }
-        patterns.append(pattern)
-    
-    return patterns
-
-def is_file_processed(video_path: str, pattern: Dict, output_dir: str) -> bool:
+def is_file_processed(video_path: str, output_dir: str) -> bool:
     """检查文件是否已经被处理过
     
     Args:
         video_path: 视频文件路径
-        pattern: 处理模式参数
         output_dir: 输出目录
     
     Returns:
         bool: 如果文件已处理返回True，否则返回False
     """
     video_name = Path(video_path).stem
-    output_name = f"{video_name}_{pattern['name']}.mp4"
-    output_path = os.path.join(output_dir, pattern['name'], output_name)
+    output_name = f"{video_name}_enhanced.mp4"
+    output_path = os.path.join(output_dir, output_name)
     return os.path.exists(output_path)
 
-def process_pair(model, video_path: str, audio_path: str, output_dir: str, pattern: Dict):
-    """处理一对视频和音频文件，使用指定的处理模式
+def process_pair(model, video_path: str, audio_path: str, output_dir: str):
+    """处理一对视频和音频文件
     
     Args:
         model: 已加载的模型
         video_path: 视频文件路径
         audio_path: 音频文件路径
         output_dir: 输出目录
-        pattern: 处理模式参数
     """
-    # 检查是否已经处理过
-    if is_file_processed(video_path, pattern, output_dir):
-        print(f"跳过已处理的文件: {video_path} (模式: {pattern['name']})")
-        return
-        
     # 生成输出文件名
     video_name = Path(video_path).stem
-    output_name = f"{video_name}_{pattern['name']}.mp4"
-    output_path = os.path.join(output_dir, pattern['name'], output_name)
+    output_name = f"{video_name}_enhanced.mp4"
+    output_path = os.path.join(output_dir, output_name)
     
     print(f"正在处理: {video_path} + {audio_path} -> {output_path}")
-    print(f"处理模式: {pattern}")
     
     try:
         # 直接使用模型进行推理
@@ -103,9 +74,6 @@ def process_pair(model, video_path: str, audio_path: str, output_dir: str, patte
             video_path,
             audio_path,
             output_path,
-            is_compress=pattern['compress'],
-            is_noise=pattern['noise'],
-            is_blur=pattern['blur']
         )
         print(f"成功处理: {output_path}")
     except Exception as e:
@@ -138,32 +106,16 @@ def main():
     pairs = get_video_audio_pairs()
     print(f"找到 {len(pairs)} 对视频-音频文件待处理")
     
-    # 获取所有处理模式
-    patterns = get_processing_patterns()
-    print(f"将使用 {len(patterns)} 种不同的处理模式")
-    
     # 创建输出目录
-    output_dir = os.path.join(GLOBAL_CONFIG.output_dir, "pattern_test")
+    output_dir = os.path.join(GLOBAL_CONFIG.output_dir, "enhanced")
     os.makedirs(output_dir, exist_ok=True)
-    
-    # 保存处理模式信息
-    pattern_info = {
-        'patterns': patterns,
-        'total_patterns': len(patterns),
-        'total_pairs': len(pairs),
-        'force_reprocess': args.force
-    }
-    with open(os.path.join(output_dir, 'pattern_info.json'), 'w') as f:
-        json.dump(pattern_info, f, indent=4)
     
     # 处理每一对视频-音频文件
     for video_path, audio_path in pairs:
-        # 对每个处理模式进行处理
-        for pattern in patterns:
-            if not args.force and is_file_processed(video_path, pattern, output_dir):
-                print(f"跳过已处理的文件: {video_path} (模式: {pattern['name']})")
-                continue
-            process_pair(model, video_path, audio_path, output_dir, pattern)
+        if not args.force and is_file_processed(video_path, output_dir):
+            print(f"跳过已处理的文件: {video_path}")
+            continue
+        process_pair(model, video_path, audio_path, output_dir)
     
     if args.time:
         Timer.summary()

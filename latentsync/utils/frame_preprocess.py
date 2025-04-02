@@ -56,19 +56,6 @@ def simulate_compression(frame: np.ndarray) -> np.ndarray:
     frame = cv2.resize(frame, (w, h), interpolation=cv2.INTER_LINEAR)
     return frame
 
-def add_gaussian_noise(frame: np.ndarray) -> np.ndarray:
-    """添加高斯噪点
-    
-    Args:
-        frame: 输入图像，RGB格式
-        
-    Returns:
-        处理后的图像，RGB格式
-    """
-    noise = np.random.normal(0, 0.5, frame.shape).astype(np.uint8)
-    frame = cv2.add(frame, noise)
-    return frame
-
 def add_slight_blur(frame: np.ndarray) -> np.ndarray:
     """添加轻微模糊
     
@@ -82,8 +69,8 @@ def add_slight_blur(frame: np.ndarray) -> np.ndarray:
     frame = cv2.GaussianBlur(frame, (kernel_size, kernel_size), 0)
     return frame
 
-def degrade_image_quality(frame: np.ndarray, is_compress: bool = False, is_noise: bool = False, is_blur: bool = False) -> np.ndarray:
-    """降低图像质量并添加噪点
+def degrade_image_quality(frame: np.ndarray) -> np.ndarray:
+    """降低图像质量并添加模糊
     
     Args:
         frame: 输入图像，RGB格式
@@ -92,23 +79,17 @@ def degrade_image_quality(frame: np.ndarray, is_compress: bool = False, is_noise
         处理后的图像，RGB格式
     """
     # 1. 降低分辨率再放大，模拟压缩失真
-    if is_compress:
-        frame = simulate_compression(frame)
+    frame = simulate_compression(frame)
     
-    # 2. 添加高斯噪点
-    if is_noise:
-        frame = add_gaussian_noise(frame)
-    
-    # 3. 添加轻微模糊
-    if is_blur:
-        frame = add_slight_blur(frame)
+    # 2. 添加轻微模糊
+    frame = add_slight_blur(frame)
     
     # 确保像素值在有效范围内
     frame = np.clip(frame, 0, 255).astype(np.uint8)
     
     return frame
 
-def process_frame(frame: np.ndarray, is_compress: bool = False, is_noise: bool = False, is_blur: bool = False) -> np.ndarray:
+def process_frame(frame: np.ndarray) -> np.ndarray:
     """处理单帧图像，包括质量降低和尺寸调整
     
     Args:
@@ -117,13 +98,13 @@ def process_frame(frame: np.ndarray, is_compress: bool = False, is_noise: bool =
     Returns:
         处理后的图像，RGB格式
     """
-    # 降低图像质量并添加噪点
-    frame = degrade_image_quality(frame, is_compress, is_noise, is_blur)
+    # 降低图像质量并添加模糊
+    frame = degrade_image_quality(frame)
     # 调整到720p
     frame = resize_to_720p(frame)
     return frame
 
-def process_frames(frames: List[np.ndarray], is_compress: bool = False, is_noise: bool = False, is_blur: bool = False) -> List[np.ndarray]:
+def process_frames(frames: List[np.ndarray]) -> List[np.ndarray]:
     """批量处理图像帧
     
     Args:
@@ -132,4 +113,4 @@ def process_frames(frames: List[np.ndarray], is_compress: bool = False, is_noise
     Returns:
         处理后的图像帧列表
     """
-    return [process_frame(frame, is_compress, is_noise, is_blur) for frame in frames] 
+    return [process_frame(frame) for frame in frames] 
