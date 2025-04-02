@@ -1,6 +1,5 @@
 from tqdm import tqdm
 from latentsync.configs.config import GLOBAL_CONFIG, LipsyncConfig
-from latentsync.face_detection import FaceLandmarkDetector
 from latentsync.pipelines.metadata import LipsyncMetadata
 from latentsync.utils.affine_transform import AlignRestore, laplacianSmooth
 import cv2
@@ -10,17 +9,50 @@ from einops import rearrange
 from typing import List, Optional, Tuple
 from latentsync.utils.timer import Timer
 from latentsync.utils.video import VideoReader
+import insightface
+from dataclasses import dataclass
 
+@dataclass
+class DetectedFace:
+    bbox: np.ndarray
+    landmark_3d_68: np.ndarray
+    det_score: float
+    pose: np.ndarray
+    
+    @property
+    def landmark_2d_68(self):
+        return self.landmark_3d_68[:, :2]
+
+class InsightLandmarkDetector:
+    def __init__(self, device: str = "cuda"):
+        self.device = device
+        self.face_analyzer = insightface.app.FaceAnalysis(
+            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            allowed_modules=["detection", "landmark_3d_68", "pose"],  # 只启用需要的模块
+        )
+        self.face_analyzer.prepare(ctx_id=0, det_size=(224, 224))
+    
+    def detect(self, image: np.ndarray)-> Optional[DetectedFace]:
+        faces = self.face_analyzer.get(image)
+        if not faces:
+            return None
+        face = max(faces, key=lambda face: face.det_score)
+        return DetectedFace(
+            bbox=face.bbox,
+            landmark_3d_68=face.landmark_3d_68,
+            det_score=face.det_score,
+            pose=face.pose,
+        )
 
 class FaceProcessor:
     """Class for face detection and affine transformation operations"""
 
-    def __init__(self, resolution: int = 512, device: str = "cpu", config: LipsyncConfig = None):
+    def __init__(self, resolution: int = 512, device: str = "cpu"):
         self.resolution = resolution
         self.device = device
         self.smoother = laplacianSmooth()
         self.restorer = AlignRestore()
-        self.face_detector = FaceLandmarkDetector(device=self.device, config=config)
+        self.face_detector = InsightLandmarkDetector(device=self.device)
 
     @torch.no_grad()
     def affine_transform(self, image: np.ndarray) -> Tuple[torch.Tensor, list, np.ndarray]:
@@ -36,11 +68,10 @@ class FaceProcessor:
             - Bounding box coordinates [x1, y1, x2, y2]
             - Affine transformation matrix
         """
-
-        detected_faces = self.face_detector.get_landmarks(image)
-        if detected_faces is None:
+        face = self.face_detector.detect(image)
+        if face is None:
             raise RuntimeError("Face not detected")
-        lm68 = detected_faces[0]
+        lm68 = face.landmark_2d_68
 
         # Step 2: Smooth landmarks
 
@@ -52,13 +83,12 @@ class FaceProcessor:
 
         # Step 3: Calculate and apply affine transformation
 
-        face, affine_matrix = self.restorer.align_warp_face(
+        face_image, affine_matrix = self.restorer.align_warp_face(
             image.copy(), lmks3=lmk3_, smooth=True, border_mode="constant"
         )
-
-        box = [0, 0, face.shape[1], face.shape[0]]  # x1, y1, x2, y2
-        # face = torch.from_numpy(face)
-        return face, box, affine_matrix
+        
+        box = [0, 0, face_image.shape[1], face_image.shape[0]]  # x1, y1, x2, y2
+        return face_image, box, affine_matrix
 
     @Timer()
     @torch.no_grad()

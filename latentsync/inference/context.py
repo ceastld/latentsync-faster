@@ -212,7 +212,6 @@ class LipsyncContext:
         return FaceProcessor(
             resolution=self.resolution,
             device=self.device,
-            config=self.config,
         )
 
     @classmethod
