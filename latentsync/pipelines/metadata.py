@@ -8,13 +8,30 @@ from dataclasses import dataclass
 
 
 @dataclass
+class DetectedFace:
+    bbox: np.ndarray
+    landmark_3d_68: np.ndarray
+    det_score: float
+    pose: np.ndarray
+
+    @property
+    def landmark_2d_68(self):
+        return self.landmark_3d_68[:, :2]
+
+
+@dataclass
 class LipsyncMetadata:
     face: np.ndarray
-    box: np.ndarray
+    detected_face: DetectedFace
     affine_matrix: np.ndarray
     original_frame: np.ndarray
     sync_face: np.ndarray = None
     audio_feature: np.ndarray = None
+
+    def __post_init__(self):
+        self.face_shape = None
+        if self.face is not None:
+            self.face_shape = self.face.shape[:2]
 
     @property
     def face_tensor(self):
@@ -22,7 +39,7 @@ class LipsyncMetadata:
         if isinstance(self.face, torch.Tensor):
             return self.face
         return torch.from_numpy(self.face)
-    
+
     @property
     def audio_feature_tensor(self):
         assert self.audio_feature is not None
@@ -32,21 +49,10 @@ class LipsyncMetadata:
 
     @torch.no_grad()
     def set_sync_face(self, face: torch.Tensor):
-        # face = face.detach() # [280, 210, 3]
-        x1, y1, x2, y2 = self.box
-        height = int(y2 - y1)
-        width = int(x2 - x1)
-
+        height, width = self.face_shape
         face = torchvision.transforms.functional.resize(face, size=(height, width), antialias=True)
         face = rearrange(face, "c h w -> h w c")
         face = (face / 2 + 0.5).clamp(0, 1)
         face = (face * 255).to(torch.uint8)
         face = face.cpu().numpy()
         self.sync_face = face
-
-    def restore_face(self):
-        x1, y1, x2, y2 = self.box
-        image = self.original_frame.copy()
-        print(self.affine_matrix)
-        image[y1:y2, x1:x2] = self.sync_face
-        return image

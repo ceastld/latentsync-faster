@@ -1,6 +1,7 @@
 from tqdm import tqdm
 from latentsync.configs.config import GLOBAL_CONFIG, LipsyncConfig
 from latentsync.pipelines.metadata import LipsyncMetadata
+from latentsync.pipelines.metadata import DetectedFace
 from latentsync.utils.affine_transform import AlignRestore, laplacianSmooth
 import cv2
 import numpy as np
@@ -10,18 +11,7 @@ from typing import List, Optional, Tuple
 from latentsync.utils.timer import Timer
 from latentsync.utils.video import VideoReader
 import insightface
-from dataclasses import dataclass
 
-@dataclass
-class DetectedFace:
-    bbox: np.ndarray
-    landmark_3d_68: np.ndarray
-    det_score: float
-    pose: np.ndarray
-    
-    @property
-    def landmark_2d_68(self):
-        return self.landmark_3d_68[:, :2]
 
 class InsightLandmarkDetector:
     def __init__(self, device: str = "cuda"):
@@ -31,8 +21,8 @@ class InsightLandmarkDetector:
             allowed_modules=["detection", "landmark_3d_68", "pose"],  # 只启用需要的模块
         )
         self.face_analyzer.prepare(ctx_id=0, det_size=(224, 224))
-    
-    def detect(self, image: np.ndarray)-> Optional[DetectedFace]:
+
+    def detect(self, image: np.ndarray) -> Optional[DetectedFace]:
         faces = self.face_analyzer.get(image)
         if not faces:
             return None
@@ -43,6 +33,7 @@ class InsightLandmarkDetector:
             det_score=face.det_score,
             pose=face.pose,
         )
+
 
 class FaceProcessor:
     """Class for face detection and affine transformation operations"""
@@ -55,7 +46,7 @@ class FaceProcessor:
         self.face_detector = InsightLandmarkDetector(device=self.device)
 
     @torch.no_grad()
-    def affine_transform(self, image: np.ndarray) -> Tuple[torch.Tensor, list, np.ndarray]:
+    def affine_transform(self, image: np.ndarray) -> Tuple[torch.Tensor, np.ndarray, DetectedFace]:
         """
         Detect face landmarks and apply affine transformation to align the face
 
@@ -65,16 +56,14 @@ class FaceProcessor:
         Returns:
             Tuple containing:
             - Transformed face image tensor
-            - Bounding box coordinates [x1, y1, x2, y2]
             - Affine transformation matrix
         """
-        face = self.face_detector.detect(image)
-        if face is None:
+        detected_face = self.face_detector.detect(image)
+        if detected_face is None:
             raise RuntimeError("Face not detected")
-        lm68 = face.landmark_2d_68
+        lm68 = detected_face.landmark_2d_68
 
         # Step 2: Smooth landmarks
-
         points = self.smoother.smooth(lm68)
         lmk3_ = np.zeros((3, 2))
         lmk3_[0] = points[17:22].mean(0)
@@ -82,20 +71,21 @@ class FaceProcessor:
         lmk3_[2] = points[27:36].mean(0)
 
         # Step 3: Calculate and apply affine transformation
-
         face_image, affine_matrix = self.restorer.align_warp_face(
             image.copy(), lmks3=lmk3_, smooth=True, border_mode="constant"
         )
-        
-        box = [0, 0, face_image.shape[1], face_image.shape[0]]  # x1, y1, x2, y2
-        return face_image, box, affine_matrix
+
+        return face_image, affine_matrix, detected_face
 
     @Timer()
     @torch.no_grad()
     def prepare_face(self, frame: np.ndarray) -> LipsyncMetadata:
-        face, box, affine_matrix = self.affine_transform(frame)
+        face, affine_matrix, detected_face = self.affine_transform(frame)
         lipsync_metadata = LipsyncMetadata(
-            face=face, box=box, affine_matrix=affine_matrix, original_frame=frame, sync_face=None
+            face=face,
+            detected_face=detected_face,
+            affine_matrix=affine_matrix,
+            original_frame=frame,
         )
         return lipsync_metadata
 
@@ -109,16 +99,6 @@ class FaceProcessor:
 
         metadata_list: List[LipsyncMetadata] = []
 
-        # 对第一帧进行预热,避免后续处理时的延迟
-        # with Timer("prepare_face_batch"):
-        #     if len(metadata_list) == 0:
-        #         try:
-        #             # 使用随机小图片进行预热
-        #             warmup_img = np.random.randint(0, 255, (16, 16, 3), dtype=np.uint8)
-        #             _ = self.prepare_face(warmup_img)
-        #         except Exception as e:
-        #             print(f"预热失败: {e}")
-        #             pass
         for frame in frames:
             try:
                 metadata = self.prepare_face(frame)

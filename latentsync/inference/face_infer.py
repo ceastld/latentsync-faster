@@ -1,4 +1,5 @@
 import asyncio
+import cv2
 import numpy as np
 from tqdm import tqdm
 from latentsync.configs.config import GLOBAL_CONFIG
@@ -17,6 +18,8 @@ class FaceInference(MultiThreadInference):
         return self.context.create_face_processor()
     
     def infer_task(self, model: FaceProcessor, image: np.ndarray):
+        # Apply Gaussian blur with kernel size 3x3 before face detection
+        image = cv2.GaussianBlur(image, (3, 3), 0)
         return model.prepare_face(image)
     
     def push_frame(self, frame: np.ndarray):

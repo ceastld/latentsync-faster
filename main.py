@@ -15,7 +15,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def test():
-    model = LatentSync(version="v15")
+    model = LatentSync()
     audio_path = "assets/cxk.mp3"
     save_path = "output/gx_cxk.mp4"
     model.push_img_and_audio("gx.jpg", audio_path)
