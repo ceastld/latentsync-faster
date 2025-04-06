@@ -1,7 +1,9 @@
+from functools import cached_property
 import numpy as np
 import torch
 import torchvision
 from einops import rearrange
+from latentsync.utils.image_processor import load_fixed_mask
 from latentsync.utils.timer import Timer
 from PIL import Image
 from dataclasses import dataclass
@@ -47,12 +49,19 @@ class LipsyncMetadata:
             return self.audio_feature
         return torch.from_numpy(self.audio_feature)
 
+    @cached_property
+    def mask_image(self):
+        return 1-load_fixed_mask(256).to('cuda')
+
     @torch.no_grad()
     def set_sync_face(self, face: torch.Tensor):
         height, width = self.face_shape
+        # face [-1, 1] -> [0, 255]
+        face = (face / 2 + 0.5).clamp(0, 1)
+        # face = face * (1 - self.mask_image) + (face * 0.5 + 0.5) * self.mask_image
         face = torchvision.transforms.functional.resize(face, size=(height, width), antialias=True)
         face = rearrange(face, "c h w -> h w c")
-        face = (face / 2 + 0.5).clamp(0, 1)
+        # face = (face / 2 + 0.5).clamp(0, 1)
         face = (face * 255).to(torch.uint8)
         face = face.cpu().numpy()
         self.sync_face = face
