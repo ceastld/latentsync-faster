@@ -1,6 +1,6 @@
 from latentsync.inference.context import LipsyncContext
 from latentsync.inference.lipsync_model import LipsyncModel
-from latentsync.inference.multi_infer import MultiProcessInference, MultiThreadInference
+from latentsync.inference.multi_infer import MultiProcessInference, MultiThreadInference, InferenceTask
 from latentsync.pipelines.metadata import LipsyncMetadata
 import torch
 from typing import List, Union
@@ -27,11 +27,11 @@ class LipsyncInference(MultiThreadInference):
         super().worker()
 
     @Timer("lipsync_diffusion")
-    def process_task(self, model: LipsyncModel, idx, data: LipsyncMetadata):
+    def process_task(self, model: LipsyncModel, task: InferenceTask) -> None:
         data_buffer = self.data_buffer
         if len(data_buffer) == 0:
-            self.result_start_idx = idx
-        data_buffer.append(data)
+            self.result_start_idx = task.idx
+        data_buffer.append(task.data)
         if len(data_buffer) >= self.context.num_frames:
             results = model.process_metadata_batch(data_buffer)
             for i, result in enumerate(results):

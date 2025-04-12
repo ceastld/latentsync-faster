@@ -1,5 +1,5 @@
 import traceback
-from typing import List
+from typing import List, Any, Optional
 import numpy as np
 import torch.multiprocessing as mp
 from torch.multiprocessing import Value, Lock, Manager
@@ -11,8 +11,32 @@ import warnings
 import logging
 import threading
 import queue
+from dataclasses import dataclass
 
 from latentsync.utils.timer import Timer
+
+
+@dataclass
+class InferenceTask:
+    """
+    A dataclass to wrap inference tasks.
+    
+    Attributes:
+        idx: The index of the task
+        data: The data for the task
+    """
+    idx: Optional[int]
+    data: Any
+    
+    @property
+    def is_end(self) -> bool:
+        """
+        Check if this task is an end signal.
+        
+        Returns:
+            bool: True if this task is an end signal, False otherwise
+        """
+        return self.idx is None
 
 
 class WorkerStoppedException(Exception):
@@ -53,6 +77,19 @@ class InferenceWorker:
         :return: The inference result, should be a dictionary.
         """
         raise NotImplementedError("Subclasses must implement this method.")
+
+    def process_task(self, model: Any, task: InferenceTask) -> None:
+        """
+        Process a single inference task.
+        This method is implemented in the base class and should not be overridden by subclasses.
+        
+        :param model: The model to use for inference.
+        :param task: The task to process.
+        """
+        result = None
+        if task.data is not None:
+            result = self.infer_task(model, task.data)
+        self._set_result(task.idx, result)
 
     def _set_result(self, idx, result: np.ndarray):
         """
@@ -121,7 +158,7 @@ class InferenceWorker:
         with self.lock:
             start_idx = self.task_start_counter.value
             self.task_start_counter.value += 1
-        self.task_queue.put((start_idx, task))
+        self.task_queue.put(InferenceTask(start_idx, task))
 
     def add_tasks(self, tasks):
         """
@@ -134,12 +171,12 @@ class InferenceWorker:
             self.task_start_counter.value += len(tasks)
 
         for idx, task in enumerate(tasks):
-            self.task_queue.put((start_idx + idx, task))
+            self.task_queue.put(InferenceTask(start_idx + idx, task))
         return range(start_idx, start_idx + len(tasks))
 
     def add_end_task(self):
         for _ in range(self.num_workers):
-            self.task_queue.put((None, None))
+            self.task_queue.put(InferenceTask(None, None))
 
     async def run(self, tasks):
         """
@@ -206,15 +243,6 @@ class MultiThreadInference(InferenceWorker):
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
-    def _set_result(self, idx, result: np.ndarray):
-        """
-        Thread-safe method to set inference results
-        """
-        with self.results_lock:
-            self.results[idx] = result
-            with self.counter_lock:
-                self.task_complete_counter += 1
-
     def _get_worker_stream(self) -> torch.cuda.Stream:
         """
         Get or create a CUDA stream for the current worker thread
@@ -236,7 +264,6 @@ class MultiThreadInference(InferenceWorker):
                 self.streams[thread_id].synchronize()
                 del self.streams[thread_id]
 
-    # @Timer()
     def wait_worker_loaded(self, timeout=None):
         if self.worker_loaded_count > 0:
             return True
@@ -245,19 +272,28 @@ class MultiThreadInference(InferenceWorker):
             self.logger.info("Worker Loaded")
         return loaded
 
-    def process_task(self, model, idx, input_data):
+    def _set_result(self, idx, result: np.ndarray):
         """
-        Process a single inference task with thread-safe model access and CUDA stream
+        Set the result of an inference task.
+        :param idx: The index of the task.
+        :param result: The result of the inference task, all value should be numpy.ndarray.
+        """
+        with self.results_lock:
+            self.results[idx] = result
+            self.task_complete_counter += 1
+
+    def process_task(self, model: Any, task: InferenceTask) -> None:
+        """
+        Process a single inference task.
+        This method is implemented in the base class and should not be overridden by subclasses.
+        
+        :param model: The model to use for inference.
+        :param task: The task to process.
         """
         result = None
-        if input_data is not None:
-            stream = self._get_worker_stream()
-            with torch.cuda.stream(stream):
-                with self.model_lock:
-                    result = self.infer_task(model, input_data)
-                # Synchronize the stream to ensure all operations are complete
-                stream.synchronize()
-        self._set_result(idx, result)
+        if task.data is not None:
+            result = self.infer_task(model, task.data)
+        self._set_result(task.idx, result)
 
     def preprocess(self):
         """
@@ -278,13 +314,13 @@ class MultiThreadInference(InferenceWorker):
         try:
             while True:
                 try:
-                    idx, input_data = self.task_queue.get(timeout=self.worker_timeout)
-                    if idx is None:
+                    task = self.task_queue.get(timeout=self.worker_timeout)
+                    if task.is_end:
                         self.logger.info("Worker received end task, worker exit")
                         break
                     try:
                         self.preprocess()
-                        self.process_task(model, idx, input_data)
+                        self.process_task(model, task)
                     except Exception as e:
                         self.logger.error(f"Error in worker: {e}, worker exit")
                         traceback.print_exc()
@@ -339,7 +375,7 @@ class MultiThreadInference(InferenceWorker):
             self.task_start_counter.value += len(tasks)
 
         for idx, task in enumerate(tasks):
-            self.task_queue.put((start_idx + idx, task))
+            self.task_queue.put(InferenceTask(start_idx + idx, task))
         return range(start_idx, start_idx + len(tasks))
 
 
@@ -371,7 +407,6 @@ class MultiProcessInference(InferenceWorker):
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
-    # @Timer()
     def wait_worker_loaded(self, timeout=None):
         if self.worker_loaded_count.value > 0:
             return True
@@ -380,35 +415,23 @@ class MultiProcessInference(InferenceWorker):
             self.logger.info("Worker Loaded")
         return loaded
 
-    def process_task(self, model, idx, input_data):
-        result = None
-        if input_data is not None:
-            result = self.infer_task(model, input_data)
-        self._set_result(idx, result)
-
-    def preprocess(self):
-        """
-        Preprocess function to be run before processing tasks
-        """
-        pass
-
     def worker(self):
         """
-        Worker process function to process tasks from the queue.
+        Worker process function to process tasks from the queue
         """
+        model = self.get_model()
+
         if self.enable_timer:
             Timer.enable()
-        model = self.get_model()
         self.worker_loaded_count.value += 1
         self.worker_loaded_event.set()
         while True:
-            self.preprocess()
-            idx, input_data = self.task_queue.get(timeout=self.worker_timeout)  # Timeout to prevent hanging
-            if idx is None:
+            task = self.task_queue.get(timeout=self.worker_timeout)  # Timeout to prevent hanging
+            if task.is_end:
                 self.logger.info("Worker recived end Task, worker exit")
                 break
             try:
-                self.process_task(model, idx, input_data)
+                self.process_task(model, task)
             except Exception as e:
                 self.logger.error(f"Error in worker: {e}, worker exit")
                 traceback.print_exc()

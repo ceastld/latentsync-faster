@@ -8,8 +8,8 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 from latentsync.configs.config import GLOBAL_CONFIG
-from latentsync.inference.lipsync_infer import LipsyncBatchInference, LipsyncInference, LipsyncRestore
-from latentsync.inference.audio_infer import AudioBatchInference, AudioInference
+from latentsync.inference.lipsync_infer import LipsyncBatchInference, LipsyncRestore
+from latentsync.inference.audio_infer import AudioBatchInference
 from latentsync.inference.context import LipsyncContext, LipsyncContext_v15
 from latentsync.inference.face_infer import FaceInference
 from latentsync.inference.multi_infer import MultiThreadInference

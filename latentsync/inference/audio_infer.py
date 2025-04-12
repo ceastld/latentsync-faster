@@ -8,7 +8,7 @@ from latentsync.inference.context import LipsyncContext
 from latentsync.inference.utils import align_audio_features, load_audio_clips, preprocess_audio
 from latentsync.utils.timer import Timer
 from latentsync.whisper.whisper.audio import load_audio
-from latentsync.inference.multi_infer import MultiThreadInference
+from latentsync.inference.multi_infer import MultiThreadInference, InferenceTask
 from latentsync.inference.buffer_infer import BufferInference
 
 
@@ -63,11 +63,11 @@ class AudioInference(MultiThreadInference):
         self.last_audio_samples = None
         super().worker()
 
-    def process_task(self, model: AudioProcessor, idx, audio_clip: np.ndarray):
+    def process_task(self, model: AudioProcessor, task: InferenceTask) -> None:
         audio_buffer = self.audio_buffer
         if len(audio_buffer) == 0:
-            self.result_start_idx = idx
-        audio_buffer.append(audio_clip)
+            self.result_start_idx = task.idx
+        audio_buffer.append(task.data)
         if len(audio_buffer) >= self.context.audio_batch_size:
             audio_samples = np.concatenate(audio_buffer)
             result = model.process_audio_with_pre(self.last_audio_samples, audio_samples)
