@@ -190,10 +190,14 @@ class LatentSync:
         self.context = LipsyncContext.from_version(version, num_frames=num_frames, checkpoint_dir=checkpoint_dir, **kwargs)
         self.enable_progress = enable_progress
         self.video_fps = video_fps
+        self.worker_timeout = worker_timeout
+        self.setup_model()
+        
+    def setup_model(self):
         self.model = LatentSyncInference(
             context=self.context,
-            enable_progress=enable_progress,
-            worker_timeout=worker_timeout,
+            enable_progress=self.enable_progress,
+            worker_timeout=self.worker_timeout,
         )
         self.model.start_processing()
 

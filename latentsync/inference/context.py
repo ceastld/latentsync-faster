@@ -10,6 +10,7 @@ from latentsync.models.unet import UNet3DConditionModel
 from latentsync.utils.face_processor import FaceProcessor
 from latentsync.whisper.audio2feature import Audio2Feature
 from latentsync.models_v15.unet import UNet3DConditionModel as UNet3DConditionModel_v15
+from functools import cached_property
 
 
 def set_seed(seed: int):
@@ -115,7 +116,8 @@ class LipsyncContext:
         if self.seed is not None:
             set_seed(self.seed)
 
-    def create_audio_encoder(self) -> Audio2Feature:
+    @cached_property
+    def audio_encoder(self) -> Audio2Feature:
         """Create audio encoder for processing audio samples"""
         return Audio2Feature(
             model_path=self.config.whisper_model_path,
@@ -123,12 +125,13 @@ class LipsyncContext:
             num_frames=self.num_frames,
         )
 
-    def create_unet(self) -> UNet3DConditionModel:
+    @cached_property
+    def unet(self) -> UNet3DConditionModel:
         """Create UNet model for diffusion"""
         if self.use_trt:
-            return self.create_unet_trt()
+            return self.unet_trt
         elif self.use_onnx:
-            return self.create_unet_onnx()
+            return self.unet_onnx
         else:
             unet, _ = UNet3DConditionModel.from_pretrained(
                 OmegaConf.to_container(self.config.unet_config.model),
@@ -139,7 +142,8 @@ class LipsyncContext:
                 unet.enable_xformers_memory_efficient_attention()
             return unet.eval().to(dtype=self.weight_dtype)
 
-    def create_unet_onnx(self) -> UNet3DConditionModel:
+    @cached_property
+    def unet_onnx(self) -> UNet3DConditionModel:
         """Create ONNX UNet model for diffusion with same interface as PyTorch UNet"""
         import os
         from latentsync.models.onnx_wrapper import ONNXModelWrapper
@@ -159,7 +163,8 @@ class LipsyncContext:
 
         return unet
 
-    def create_unet_trt(self) -> UNet3DConditionModel:
+    @cached_property
+    def unet_trt(self) -> UNet3DConditionModel:
         """Create TensorRT UNet model for diffusion with same interface as PyTorch UNet"""
         import os
         from latentsync.models.trt_wrapper import TRTModelWrapper
@@ -179,27 +184,31 @@ class LipsyncContext:
 
         return unet
 
-    def create_vae(self) -> Union[AutoencoderTiny, AutoencoderKL]:
+    @cached_property
+    def vae(self) -> Union[AutoencoderTiny, AutoencoderKL]:
         """Create VAE model for encoding/decoding images based on selected type"""
         if self.vae_type == "tiny":
-            return self.create_vae_tiny()
+            return self.vae_tiny
         else:  # kl
-            return self.create_vae_kl()
+            return self.vae_kl
 
-    def create_vae_tiny(self) -> AutoencoderTiny:
+    @cached_property
+    def vae_tiny(self) -> AutoencoderTiny:
         """Create VAE model for encoding/decoding images"""
         vae = AutoencoderTiny.from_pretrained("madebyollin/taesd", torch_dtype=self.weight_dtype)
         vae.config.scaling_factor = 1.0
         vae.config.shift_factor = 0
         return vae.eval().to(self.device)
 
-    def create_vae_kl(self) -> AutoencoderKL:
+    @cached_property
+    def vae_kl(self) -> AutoencoderKL:
         vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", torch_dtype=self.weight_dtype)
         vae.config.scaling_factor = 0.18215
         vae.config.shift_factor = 0
         return vae.eval().to(self.device)
 
-    def create_scheduler(self) -> DPMSolverMultistepScheduler:
+    @cached_property
+    def scheduler(self) -> DPMSolverMultistepScheduler:
         """Create diffusion scheduler"""
         return DPMSolverMultistepScheduler.from_pretrained(
             self.config.config_dir,
@@ -208,7 +217,8 @@ class LipsyncContext:
             # use_karras_sigmas=True,
         )
 
-    def create_face_processor(self) -> FaceProcessor:
+    @cached_property
+    def face_processor(self) -> FaceProcessor:
         return FaceProcessor(
             resolution=self.resolution,
             device=self.device,
@@ -237,7 +247,8 @@ class LipsyncContext_v15(LipsyncContext):
     def get_config(self, checkpoint_dir: str) -> LipsyncConfig_v15:
         return LipsyncConfig_v15(checkpoint_dir)
 
-    def create_unet(self) -> UNet3DConditionModel_v15:
+    @cached_property
+    def unet(self) -> UNet3DConditionModel_v15:
         """Create UNet model for diffusion"""
         unet, _ = UNet3DConditionModel_v15.from_pretrained(
             OmegaConf.to_container(self.config.unet_config.model),

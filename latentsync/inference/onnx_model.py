@@ -188,7 +188,7 @@ class ONNXUNet:
 
 def create_onnx_unet(model_path: str, use_gpu: bool = True, fp16: bool = False) -> ONNXUNet:
     """
-    创建ONNX UNet模型实例，与LipsyncContext.create_unet()方法的使用方式类似
+    创建ONNX UNet模型实例，与LipsyncContext.unet属性的使用方式类似
     
     Args:
         model_path: ONNX模型文件路径
@@ -208,7 +208,7 @@ def create_onnx_unet(model_path: str, use_gpu: bool = True, fp16: bool = False) 
 
 def patch_context_for_onnx(context, onnx_model_path: str, use_gpu: bool = True, fp16: bool = False):
     """
-    修补LipsyncContext，替换create_unet方法以使用ONNX模型
+    修补LipsyncContext，替换unet属性以使用ONNX模型
     
     Args:
         context: LipsyncContext实例
@@ -220,13 +220,13 @@ def patch_context_for_onnx(context, onnx_model_path: str, use_gpu: bool = True, 
         LipsyncContext: 修补后的LipsyncContext实例
     """
     # 保存原始方法
-    original_create_unet = context.create_unet
+    original_unet = context.unet
     
-    # 替换create_unet方法
+    # 替换unet属性方法
     def create_onnx_unet_wrapper():
         return create_onnx_unet(onnx_model_path, use_gpu, fp16)
     
     # 替换方法
-    context.create_unet = create_onnx_unet_wrapper
+    context.unet = create_onnx_unet_wrapper
     
     return context 

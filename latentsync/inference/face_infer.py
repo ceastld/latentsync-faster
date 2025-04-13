@@ -15,7 +15,7 @@ class FaceInference(MultiThreadInference):
         self.context = context
 
     def get_model(self):
-        return self.context.create_face_processor()
+        return self.context.face_processor
     
     def infer_task(self, model: FaceProcessor, image: np.ndarray):
         # Apply Gaussian blur with kernel size 3x3 before face detection

@@ -298,7 +298,7 @@ class LipsyncDiffusionPipeline(DiffusionPipeline):
 
     @cached_property
     def face_processor(self):
-        return self.lipsync_context.create_face_processor()
+        return self.lipsync_context.face_processor
 
     @Timer()
     def _denoising_step(self, latents, t, audio_embeds, mask_latents, masked_image_latents, image_latents, context: LipsyncContext):

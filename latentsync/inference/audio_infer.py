@@ -15,7 +15,7 @@ from latentsync.inference.buffer_infer import BufferInference
 class AudioProcessor:
     def __init__(self, context: LipsyncContext):
         self.context: LipsyncContext = context
-        self.audio_encoder = context.create_audio_encoder()
+        self.audio_encoder = context.audio_encoder
 
     @torch.no_grad()
     def process_audio(self, audio_samples: np.ndarray, num_faces: int = -1) -> Optional[torch.Tensor]:

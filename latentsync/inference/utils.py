@@ -17,9 +17,9 @@ def create_diffusion_pipeline(context: LipsyncContext) -> LipsyncDiffusionPipeli
         LipsyncDiffusionPipeline: The lipsync diffusion pipeline
     """
     return LipsyncDiffusionPipeline(
-        vae=context.create_vae(),
-        unet=context.create_unet(),
-        scheduler=context.create_scheduler(),
+        vae=context.vae,
+        unet=context.unet,
+        scheduler=context.scheduler,
         lipsync_context=context,
     ).to(context.device)
 
@@ -34,10 +34,10 @@ def create_pipeline(context: LipsyncContext) -> LipsyncPipeline:
         LipsyncPipeline: The lipsync pipeline
     """
     return LipsyncPipeline(
-        vae=context.create_vae(),
-        audio_encoder=context.create_audio_encoder(),
-        unet=context.create_unet(),
-        scheduler=context.create_scheduler(),
+        vae=context.vae,
+        audio_encoder=context.audio_encoder,
+        unet=context.unet,
+        scheduler=context.scheduler,
         lipsync_context=context,
     ).to(context.device)
 
