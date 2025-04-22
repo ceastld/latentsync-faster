@@ -2,7 +2,7 @@ from accelerate.utils import set_seed as acc_seed
 from latentsync.configs.config import CHECKPOINT_DIR, LipsyncConfig, LipsyncConfig_v15
 import torch
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Union, Literal
 from omegaconf import OmegaConf
 from diffusers import AutoencoderTiny, AutoencoderKL, DPMSolverMultistepScheduler
 from diffusers.utils.import_utils import is_xformers_available
@@ -54,7 +54,7 @@ class LipsyncContext:
         use_trt: bool = False,
         seed: int = None,
         # VAE selection
-        vae_type: Optional[str] = None,
+        vae_type: Optional[Literal["tiny", "kl"]] = None,
         checkpoint_dir: str = None,
     ):
         checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR

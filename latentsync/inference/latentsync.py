@@ -182,7 +182,7 @@ class LatentSync:
         version=None,
         enable_progress=False,
         video_fps: int = 25,
-        worker_timeout: int = 60,
+        worker_timeout: int = 3600,
         num_frames: int = None,
         checkpoint_dir: str = None,
         **kwargs,
@@ -194,6 +194,9 @@ class LatentSync:
         self.setup_model()
         
     def setup_model(self):
+        if isinstance(self.model, LatentSyncInference):
+            self.model.stop_workers()
+            
         self.model = LatentSyncInference(
             context=self.context,
             enable_progress=self.enable_progress,
