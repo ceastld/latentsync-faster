@@ -40,8 +40,8 @@ async def main():
 
 if __name__ == "__main__":
     # Timer.enable()
-    # asyncio.run(main())
-    audio_clips = load_audio_clips("assets/cxk.mp3", 625)
-    print(audio_clips[0])
+    asyncio.run(main())
+    # audio_clips = load_audio_clips("assets/cxk.mp3", 625)
+    # print(audio_clips[0])
     # Timer.summary()
     # asyncio.run(test())

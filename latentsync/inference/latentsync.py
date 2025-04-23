@@ -191,6 +191,7 @@ class LatentSync:
         self.enable_progress = enable_progress
         self.video_fps = video_fps
         self.worker_timeout = worker_timeout
+        self.model = None
         self.setup_model()
         
     def setup_model(self):
