@@ -24,19 +24,19 @@ async def test():
     print(f"Saved to {save_path}")
 
 async def test_obama(model: LatentSync):
-    example = GLOBAL_CONFIG.inference.obama1
-    model.push_video_stream(example.video_path, example.audio_path, fps=25)
+    example = GLOBAL_CONFIG.inference.obama
+    model.push_video_stream(example.video_path, example.audio_path)
     results = await model.get_all_results()
     logger.info(f"Results: {len(results)}")
     save_frames_to_video(results, example.video_out_path, audio_path=example.audio_path, save_images=True)
     print(f"Saved to {example.video_out_path}")
     
 async def main():
-    model = LatentSync(enable_progress=False)
+    model = LatentSync(enable_progress=True, vae_type="tiny")
     # print(model.context.num_inference_steps)
     await test_obama(model)
-    model.setup_model()
-    await test_obama(model)
+    # model.setup_model()
+    # await test_obama(model)
 
 if __name__ == "__main__":
     # Timer.enable()
