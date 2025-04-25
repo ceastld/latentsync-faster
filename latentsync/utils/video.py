@@ -161,6 +161,7 @@ class LazyVideoWriter:
         self.tmp_audio_file = None
         
         # 准备临时文件
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
         self.tmp_video_file = tempfile.NamedTemporaryFile("w", suffix=".mp4", dir=Path(save_path).parent)
         self.actual_save_path = save_path
         self.temp_video_path = self.tmp_video_file.name

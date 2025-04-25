@@ -606,8 +606,18 @@ class LatentSync:
         logger.info(f"Processed {count} frames")
         print(f"Saved to {video_path}")
         return count
-
-
+    
+    async def inference(self, video_path, audio_path, output_path):
+        """Inference the video and audio.
+        
+        Args:
+            video_path (str): Path to the video file.
+            audio_path (str): Path to the audio file.
+            output_path (str): Path to save the output video.
+        """
+        self.push_video_stream(video_path, audio_path)
+        await self.save_to_video(output_path)
+        
 class VadLatentSync:
     """Voice Activity Detection wrapper for LatentSync.
 
