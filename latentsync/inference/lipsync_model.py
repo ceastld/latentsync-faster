@@ -135,15 +135,16 @@ class LipsyncModel:
             frames_batch = process_frames(frames_batch)
             batch_metadata = face_processor.prepare_face_batch(frames_batch)
             if not batch_metadata:
-                break
-            current_audio_samples = audio_clips[frame_idx : frame_idx + len(frames_batch)].flatten()
-            batch_audio_features = audio_processor.process_audio_with_pre(last_audio_samples, current_audio_samples)
-            last_audio_samples = current_audio_samples
-            output_metadata: List[LipsyncMetadata] = self.process_batch(
-                metadata_list=batch_metadata,
-                audio_features=batch_audio_features,
-            )
-            output_frames = self.restore_batch(output_metadata)
+                output_frames = frames_batch
+            else:   
+                current_audio_samples = audio_clips[frame_idx : frame_idx + len(frames_batch)].flatten()
+                batch_audio_features = audio_processor.process_audio_with_pre(last_audio_samples, current_audio_samples)
+                last_audio_samples = current_audio_samples
+                output_metadata: List[LipsyncMetadata] = self.process_batch(
+                    metadata_list=batch_metadata,
+                    audio_features=batch_audio_features,
+                )
+                output_frames = self.restore_batch(output_metadata)
             processed_frames.extend(output_frames)
             frame_idx += len(frames_batch)
             pbar.update(len(frames_batch))
