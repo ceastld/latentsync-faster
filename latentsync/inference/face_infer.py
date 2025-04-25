@@ -4,12 +4,14 @@ import numpy as np
 from tqdm import tqdm
 from latentsync.configs.config import GLOBAL_CONFIG
 from latentsync.inference.context import LipsyncContext
+from latentsync.pipelines.metadata import LipsyncMetadata
 from latentsync.utils.face_processor import FaceProcessor
 from latentsync.utils.timer import Timer
 from latentsync.utils.video import VideoReader
 from latentsync.inference.multi_infer import MultiThreadInference
+from typing import Dict, Any, Tuple
 
-class FaceInference(MultiThreadInference):
+class FaceInference(MultiThreadInference[np.ndarray, LipsyncMetadata]):
     def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60):
         super().__init__(num_workers, worker_timeout)
         self.context = context
@@ -17,7 +19,7 @@ class FaceInference(MultiThreadInference):
     def get_model(self):
         return self.context.face_processor
     
-    def infer_task(self, model: FaceProcessor, image: np.ndarray):
+    def infer_task(self, model: FaceProcessor, image: np.ndarray) -> LipsyncMetadata:
         # Apply Gaussian blur with kernel size 3x3 before face detection
         image = cv2.GaussianBlur(image, (3, 3), 0)
         return model.prepare_face(image)

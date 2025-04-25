@@ -20,6 +20,10 @@ class DetectedFace:
     def landmark_2d_68(self):
         return self.landmark_3d_68[:, :2]
 
+@dataclass
+class AudioMetadata:
+    audio_samples: np.ndarray
+    audio_feature: np.ndarray
 
 @dataclass
 class LipsyncMetadata:
@@ -29,6 +33,8 @@ class LipsyncMetadata:
     original_frame: np.ndarray
     sync_face: np.ndarray = None
     audio_feature: np.ndarray = None
+    audio_samples: np.ndarray = None
+    restored_frame: np.ndarray = None
 
     def __post_init__(self):
         self.face_shape = None
@@ -65,3 +71,9 @@ class LipsyncMetadata:
         face = (face * 255).to(torch.uint8)
         face = face.cpu().numpy()
         self.sync_face = face
+
+    @property
+    def lipsync_frame(self):
+        if self.restored_frame is None:
+            return self.original_frame
+        return self.restored_frame

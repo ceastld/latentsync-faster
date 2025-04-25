@@ -77,7 +77,6 @@ class FaceProcessor:
 
         return face_image, affine_matrix, detected_face
 
-    @Timer()
     @torch.no_grad()
     def prepare_face(self, frame: np.ndarray) -> LipsyncMetadata:
         face, affine_matrix, detected_face = self.affine_transform(frame)

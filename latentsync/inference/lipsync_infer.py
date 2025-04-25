@@ -3,14 +3,14 @@ from latentsync.inference.lipsync_model import LipsyncModel
 from latentsync.inference.multi_infer import MultiProcessInference, MultiThreadInference, InferenceTask
 from latentsync.pipelines.metadata import LipsyncMetadata
 import torch
-from typing import List, Union
+from typing import List, Union, Dict, Any, Optional, TypeVar
 
 from latentsync.utils.affine_transform import AlignRestore
 from latentsync.utils.timer import Timer
 from latentsync.inference.buffer_infer import BufferInference
 
 
-class LipsyncInference(MultiThreadInference):
+class LipsyncInference(MultiThreadInference[LipsyncMetadata, LipsyncMetadata]):
     def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60):
         super().__init__(num_workers, worker_timeout)
         self.context = context
@@ -27,7 +27,7 @@ class LipsyncInference(MultiThreadInference):
         super().worker()
 
     @Timer("lipsync_diffusion")
-    def process_task(self, model: LipsyncModel, task: InferenceTask) -> None:
+    def process_task(self, model: LipsyncModel, task: InferenceTask[LipsyncMetadata]) -> None:
         data_buffer = self.data_buffer
         if len(data_buffer) == 0:
             self.result_start_idx = task.idx
@@ -61,7 +61,7 @@ class LipsyncBatchInference(BufferInference[LipsyncMetadata, LipsyncMetadata]):
             return data
         return model.process_metadata_batch(data)
 
-class LipsyncRestore(MultiThreadInference):
+class LipsyncRestore(MultiThreadInference[LipsyncMetadata, LipsyncMetadata]):
     def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60):
         super().__init__(num_workers, worker_timeout)
         self.context = context
@@ -77,8 +77,8 @@ class LipsyncRestore(MultiThreadInference):
         else:
             self.add_one_task(data)
 
-    def infer_task(self, model: AlignRestore, data: LipsyncMetadata):
+    def infer_task(self, model: AlignRestore, data: LipsyncMetadata) -> LipsyncMetadata:
         # if sync_face is None, return original_frame
-        if data.sync_face is None:
-            return data.original_frame
-        return model.restore_img(data.original_frame, data.sync_face, data.affine_matrix)
+        if data.sync_face is not None:
+            data.restored_frame = model.restore_img(data.original_frame, data.sync_face, data.affine_matrix)
+        return data

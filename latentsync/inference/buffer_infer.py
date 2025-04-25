@@ -1,4 +1,4 @@
-from typing import List, TypeVar, Generic, Optional
+from typing import AsyncGenerator, List, TypeVar, Generic, Optional
 from latentsync.inference.multi_infer import MultiThreadInference
 
 T = TypeVar('T')  # Type for buffer items
@@ -44,3 +44,10 @@ class BufferInference(MultiThreadInference, Generic[T, R]):
         the batched data using the provided model.
         """
         raise NotImplementedError("Subclasses must implement infer_task") 
+    
+    async def result_stream(self) -> AsyncGenerator[R, None]:
+        """Stream results as they are available."""
+        results: List[R] 
+        async for results in super().result_stream():
+            for result in results:
+                yield result

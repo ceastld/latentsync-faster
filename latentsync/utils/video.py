@@ -75,23 +75,13 @@ def reencode_audio(audio_file, output):
 def save_frames_to_video(frames, out_path, audio_path=None, fps=25, save_images=False):
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_video_file = tempfile.NamedTemporaryFile("w", suffix=".mp4", dir=out_path.parent)
     out_image_dir = None
     if save_images:
         out_image_dir = out_path.with_suffix("")
         out_image_dir.mkdir(exist_ok=True)
-    with LazyVideoWriter(tmp_video_file.name, fps=fps, save_images=save_images, image_dir=out_image_dir) as writer:
+    with LazyVideoWriter(out_path, fps=fps, save_images=save_images, image_dir=out_image_dir, audio_sr=16000) as writer:
         for frame in frames:
             writer.write(frame)
-    if audio_path is not None:
-        # needs to re-encode audio to AAC format first, or the audio will be ahead of the video!
-        tmp_audio_file = tempfile.NamedTemporaryFile("w", suffix=".mp3", dir=out_path.parent)
-        reencode_audio(audio_path, tmp_audio_file.name)
-        combine_video_and_audio(tmp_video_file.name, tmp_audio_file.name, out_path)
-        tmp_audio_file.close()
-    else:
-        convert_video(tmp_video_file.name, out_path)
-    tmp_video_file.close()
 
 
 def change_extension(file_path, new_extension):
@@ -157,12 +147,24 @@ def data_to_numpy(data) -> Any:
 
 
 class LazyVideoWriter:
-    def __init__(self, save_path, fps=25.0, save_images=False, image_dir=None):
+    def __init__(self, save_path, fps=25.0, save_images=False, image_dir=None, audio_sr=16000):
         self.writer = None
         assert save_path.endswith(".mp4"), "Only support mp4 format"
         self.save_path = save_path
         self.save_images = save_images
         self.fps = fps
+        
+        # 音频相关设置
+        self.audio_sr = audio_sr
+        self.audio_frames = []
+        self.tmp_video_file = None
+        self.tmp_audio_file = None
+        
+        # 准备临时文件
+        self.tmp_video_file = tempfile.NamedTemporaryFile("w", suffix=".mp4", dir=Path(save_path).parent)
+        self.actual_save_path = save_path
+        self.temp_video_path = self.tmp_video_file.name
+        
         if save_images:
             self.image_dir = Path(image_dir) if image_dir is not None else Path(save_path).with_suffix("")
             self.image_dir.mkdir(exist_ok=True)
@@ -171,18 +173,71 @@ class LazyVideoWriter:
     def write(self, image: np.ndarray):
         if self.writer is None:
             size = image.shape[:2][::-1]
-            self.writer = cv2.VideoWriter(self.save_path, cv2.VideoWriter_fourcc(*"mp4v"), self.fps, size)
+            self.writer = cv2.VideoWriter(self.temp_video_path, cv2.VideoWriter_fourcc(*"mp4v"), self.fps, size)
         image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         if self.save_images:
             image_path = self.image_dir / f"{self.image_idx:06d}.jpg"
             cv2.imwrite(str(image_path), image_bgr)
             self.image_idx += 1
         self.writer.write(image_bgr)
-
-    def release(self):
+    
+    def write_audio_frame(self, audio_frame):
+        """写入音频帧，音频帧应为numpy数组或torch张量"""
+        if isinstance(audio_frame, torch.Tensor):
+            audio_frame = audio_frame.cpu().numpy()
+        self.audio_frames.append(audio_frame)
+    
+    def _save_audio(self):
+        """保存音频到临时文件"""
+        if not self.audio_frames:
+            return None
+            
+        import soundfile as sf
+        self.tmp_audio_file = tempfile.NamedTemporaryFile("w", suffix=".wav", dir=Path(self.actual_save_path).parent)
+        
+        # 将所有音频帧连接成一个连续的数组
+        audio_data = np.concatenate(self.audio_frames, axis=0)
+        
+        # 保存到临时文件
+        sf.write(self.tmp_audio_file.name, audio_data, self.audio_sr)
+        return self.tmp_audio_file.name
+    
+    def merge(self):
+        """合并视频和音频"""
         if self.writer is not None:
             self.writer.release()
             self.writer = None
+        
+        # 保存音频到临时文件
+        audio_file = self._save_audio()
+        
+        if audio_file:
+            # 需要重新编码音频以确保格式正确
+            tmp_audio_reencoded = tempfile.NamedTemporaryFile("w", suffix=".mp3", dir=Path(self.actual_save_path).parent)
+            reencode_audio(audio_file, tmp_audio_reencoded.name)
+            
+            # 合并视频和音频
+            combine_video_and_audio(self.temp_video_path, tmp_audio_reencoded.name, self.actual_save_path)
+            tmp_audio_reencoded.close()
+        else:
+            # 如果没有音频，只转换视频
+            convert_video(self.temp_video_path, self.actual_save_path)
+
+    def release(self):
+        """释放资源，并自动合并音视频"""
+        # 先合并音视频
+        if self.writer is not None or self.audio_frames:
+            self.merge()
+        
+        # 清理临时文件
+        if self.tmp_video_file:
+            self.tmp_video_file.close()
+        
+        if self.tmp_audio_file:
+            self.tmp_audio_file.close()
+            
+        # 清除音频数据
+        self.audio_frames = []
 
     def __enter__(self):
         return self

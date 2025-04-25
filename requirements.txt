@@ -25,3 +25,4 @@ tqdm==4.67.1
 transformers==4.49.0
 xformers==0.0.29.post3
 insightface
+silero
