@@ -751,8 +751,8 @@ def main(): # Synchronous
     # Update description
     parser = argparse.ArgumentParser(description="Process video files directly in a folder: convert FPS, extract audio, translate audio, and synthesize speech synchronously.")
     # Update input_dir help text
-    parser.add_argument("input_dir", type=str, help="Directory containing video files to process.") 
-    parser.add_argument("output_dir", type=str, help="Directory to save the processed results (in subfolders named after videos).")
+    parser.add_argument("--input_dir", type=str, help="Directory containing video files to process.") 
+    parser.add_argument("--output_dir", type=str, help="Directory to save the processed results (in subfolders named after videos).")
     parser.add_argument("--target_fps", type=int, default=DEFAULT_TARGET_FPS, help=f"Target video frame rate (default: {DEFAULT_TARGET_FPS}).")
     parser.add_argument("--target_langs", type=str, default=DEFAULT_TARGET_LANGS,
                         help=f"Comma-separated list of target language codes for translation (e.g., 'zh,fr,es', default: {DEFAULT_TARGET_LANGS}). See TARGET_LANGUAGE_NAMES.")
