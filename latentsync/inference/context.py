@@ -230,7 +230,7 @@ class LipsyncContext:
         return cls(**config_dict)
 
     @staticmethod
-    def from_version(version: str, **kwargs) -> "LipsyncContext":
+    def from_version(version: Literal["v15", "v10"], **kwargs) -> "LipsyncContext":
         """
         version: str in ["v15", "v10"]
         """
