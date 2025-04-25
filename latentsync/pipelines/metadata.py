@@ -27,10 +27,10 @@ class AudioMetadata:
 
 @dataclass
 class LipsyncMetadata:
-    face: np.ndarray
-    detected_face: DetectedFace
-    affine_matrix: np.ndarray
     original_frame: np.ndarray
+    face: np.ndarray = None
+    detected_face: DetectedFace = None
+    affine_matrix: np.ndarray = None
     sync_face: np.ndarray = None
     audio_feature: np.ndarray = None
     audio_samples: np.ndarray = None

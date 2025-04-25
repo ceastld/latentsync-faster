@@ -1,13 +1,12 @@
 import asyncio
-from dataclasses import dataclass
 import os
-from typing import AsyncGenerator, List, Set, Union, TypeVar, Generic, Deque, Tuple
-from collections import deque
+from typing import AsyncGenerator, List, Set, Union, TypeVar
 
 import cv2
 import numpy as np
-import torch
 from tqdm import tqdm
+from latentsync.inference._datas import AudioFrame, DataSegmentEnd, AudioVideoFrame, VideoFrame
+from latentsync.inference._utils import FPSController, SileroVAD, save_async_frames
 from latentsync.inference.lipsync_infer import LipsyncBatchInference, LipsyncRestore
 from latentsync.inference.audio_infer import AudioBatchInference
 from latentsync.inference.context import LipsyncContext
@@ -16,174 +15,6 @@ from latentsync.inference.multi_infer import MultiThreadInference
 from latentsync.inference.utils import load_audio_clips
 from latentsync.pipelines.metadata import AudioMetadata, LipsyncMetadata
 from latentsync.utils.video import cycle_video_stream, LazyVideoWriter
-
-T = TypeVar("T")
-
-
-class DataSegmentEnd:
-    pass
-
-
-@dataclass
-class VideoFrame:
-    frame: np.ndarray
-
-
-@dataclass
-class AudioFrame:
-    audio_samples: np.ndarray
-    is_speech: bool = True  # Flag to indicate if the audio contains speech
-
-
-@dataclass
-class LipsyncResult:
-    audio_samples: np.ndarray
-    video_frame: np.ndarray
-
-
-class SileroVAD:
-    """Voice Activity Detection using Silero VAD model.
-
-    This class provides methods to detect speech in audio segments.
-
-    Args:
-        threshold (float, optional): Speech detection threshold. Defaults to 0.5.
-        sampling_rate (int, optional): Expected audio sampling rate. Defaults to 16000.
-    """
-
-    def __init__(self, threshold: float = 0.5, sampling_rate: int = 16000):
-        self.threshold = threshold
-        self.sampling_rate = sampling_rate
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self._load_model()
-
-    def _load_model(self):
-        """Load the Silero VAD model."""
-        model, utils = torch.hub.load(
-            repo_or_dir="snakers4/silero-vad",
-            model="silero_vad",
-            force_reload=False,
-        )
-        self.model = model.to(self.device)
-        self.get_speech_timestamps = utils[0]
-
-    def is_speech(self, audio: np.ndarray) -> bool:
-        """Detect if audio segment contains speech.
-
-        Args:
-            audio (np.ndarray): Audio samples with shape (T,)
-
-        Returns:
-            bool: True if speech is detected, False otherwise
-        """
-        # Convert numpy array to torch tensor
-        audio_tensor = torch.tensor(audio, dtype=torch.float32, device=self.device)
-
-        # Get speech timestamps
-        speech_timestamps = self.get_speech_timestamps(audio_tensor, self.model, threshold=self.threshold, sampling_rate=self.sampling_rate)
-
-        # If there are any speech timestamps, return True
-        return len(speech_timestamps) > 0
-
-    def get_speech_segments(self, audio: np.ndarray) -> List[Tuple[int, int]]:
-        """Get timestamps of speech segments in audio.
-
-        Args:
-            audio (np.ndarray): Audio samples with shape (T,)
-
-        Returns:
-            List[Tuple[int, int]]: List of (start, end) sample indices for speech segments
-        """
-        # Convert numpy array to torch tensor
-        audio_tensor = torch.tensor(audio, dtype=torch.float32, device=self.device)
-
-        # Get speech timestamps
-        speech_timestamps = self.get_speech_timestamps(audio_tensor, self.model, threshold=self.threshold, sampling_rate=self.sampling_rate)
-
-        # Convert timestamps to (start, end) tuples
-        return [(segment["start"], segment["end"]) for segment in speech_timestamps]
-
-
-class FPSController(Generic[T]):
-    """Controls the output speed of a data stream based on a target FPS.
-
-    This class buffers incoming data and outputs it at a controlled rate defined by the FPS.
-
-    Args:
-        fps (float): Target frames per second
-        max_buffer_size (int, optional): Maximum size of the buffer. Defaults to None (unlimited).
-        immediate_output_count (int, optional): Number of initial items to output immediately
-            without FPS control. Defaults to 0.
-    """
-
-    def __init__(self, fps: float, max_buffer_size: int = None, immediate_output_count: int = 0):
-        self.fps = fps
-        self.frame_interval = 1.0 / fps
-        self.buffer: Deque[T] = deque() if max_buffer_size is None else deque(maxlen=max_buffer_size)
-        self.last_frame_time = 0
-        self._stop_event = asyncio.Event()
-        self.immediate_output_count = immediate_output_count
-        self.output_count = 0
-
-    def push_data(self, data: T):
-        """Add data to the buffer.
-
-        Args:
-            data (T): Data to add to the buffer
-        """
-        self.buffer.append(data)
-
-    def push_data_batch(self, data_batch: List[T]):
-        """Add a batch of data to the buffer.
-
-        Args:
-            data_batch (List[T]): List of data to add to the buffer
-        """
-        for data in data_batch:
-            self.push_data(data)
-
-    def stop(self):
-        """Signal the stream to stop."""
-        self._stop_event.set()
-
-    async def stream(self):
-        """Stream data at the controlled FPS rate.
-
-        Initial items up to immediate_output_count will be yielded immediately without FPS control.
-        After that, items are yielded according to the specified FPS rate.
-
-        Yields:
-            T: Data from the buffer at the controlled rate
-        """
-        self.last_frame_time = asyncio.get_event_loop().time()
-
-        while not self._stop_event.is_set():
-            if not self.buffer:
-                # If buffer is empty, wait a bit and check again
-                await asyncio.sleep(0.01)
-                continue
-
-            # Check if we should output immediately (for initial items)
-            if self.output_count < self.immediate_output_count:
-                yield self.buffer.popleft()
-                self.output_count += 1
-                continue
-
-            current_time = asyncio.get_event_loop().time()
-            elapsed = current_time - self.last_frame_time
-
-            # If enough time has passed according to FPS, yield the next item
-            if elapsed >= self.frame_interval:
-                yield self.buffer.popleft()
-                self.last_frame_time = current_time
-                self.output_count += 1
-            else:
-                # Wait until it's time for the next frame
-                await asyncio.sleep(max(0, self.frame_interval - elapsed))
-
-        # Drain remaining items in buffer when stopped
-        while self.buffer:
-            yield self.buffer.popleft()
 
 
 class LatentSyncInference:
@@ -350,14 +181,14 @@ class LatentSyncInference:
         self.lipsync_restore.add_end_task()
         pbar.close()
 
-    async def result_stream(self) -> AsyncGenerator[LipsyncResult, None]:
+    async def result_stream(self) -> AsyncGenerator[AudioVideoFrame, None]:
         """Stream results from the lipsync restoration process.
-        
+
         Yields:
             LipsyncResult: A result containing processed video frame and audio sample.
         """
         async for result in self.lipsync_restore.result_stream():
-            yield LipsyncResult(
+            yield AudioVideoFrame(
                 audio_samples=result.audio_samples,
                 video_frame=result.lipsync_frame,
             )
@@ -484,7 +315,7 @@ class LatentSync:
         else:
             self.model.push_audio(audio)
 
-    def push_video_stream(self, video_path, audio_path, max_frames: int = None):
+    def push_video_stream(self, video_path, audio_path, max_frames: int = None, max_input_fps: int = 40):
         """Push a video stream with audio for processing.
 
         Args:
@@ -495,9 +326,9 @@ class LatentSync:
         """
         assert os.path.exists(video_path), f"Video file {video_path} does not exist"
         assert os.path.exists(audio_path), f"Audio file {audio_path} does not exist"
-        self.model.create_task(self._push_video_streaming(video_path, audio_path, max_frames))
+        self.model.create_task(self._push_video_streaming(video_path, audio_path, max_frames, max_input_fps))
 
-    async def _push_video_streaming(self, video_path, audio_path, max_frames: int = None):
+    async def _push_video_streaming(self, video_path, audio_path, max_frames: int = None, max_input_fps: int = 40):
         audio_clips = load_audio_clips(audio_path, self.context.samples_per_frame)
 
         # No need to manually control FPS here, just push data as fast as possible
@@ -507,7 +338,7 @@ class LatentSync:
             self.push_audio(audio_clips[i % len(audio_clips)])
 
             # Small sleep to prevent overwhelming the CPU
-            await asyncio.sleep(0.001)
+            await asyncio.sleep(1 / max_input_fps)
 
         self.model.add_end_task()
 
@@ -567,57 +398,21 @@ class LatentSync:
         self.model.add_end_task()
 
     async def save_to_video(self, video_path, save_images=False, total_frames=None):
-        """Save the processed results to a video file.
-
-        Args:
-            video_path (str): Path to save the output video.
-            save_images (bool, optional): Whether to save individual frames as images. Defaults to False.
-            total_frames (int, optional): Total number of frames for progress bar. Defaults to None.
-
-        Returns:
-            int: Number of frames processed.
-        """
-        count = 0
-        import logging
-        from tqdm import tqdm
-
-        logger = logging.getLogger(__name__)
-
-        pbar = None
-        if self.enable_progress:
-            pbar = tqdm(desc="Saving video", total=total_frames)
-
-        with LazyVideoWriter(
+        await save_async_frames(
+            self.result_stream(),
             video_path,
-            fps=self.context.video_fps,
+            video_fps=self.context.video_fps,
             audio_sr=self.context.audio_sample_rate,
             save_images=save_images,
-        ) as writer:
-            async for result in self.result_stream():
-                writer.write(result.video_frame)
-                writer.write_audio_frame(result.audio_samples)
-                count += 1
-                if pbar:
-                    pbar.update(1)
+            disable_progress=not self.enable_progress,
+            total_frames=total_frames,
+        )
 
-        if pbar:
-            pbar.close()
-
-        logger.info(f"Processed {count} frames")
-        print(f"Saved to {video_path}")
-        return count
-    
     async def inference(self, video_path, audio_path, output_path):
-        """Inference the video and audio.
-        
-        Args:
-            video_path (str): Path to the video file.
-            audio_path (str): Path to the audio file.
-            output_path (str): Path to save the output video.
-        """
         self.push_video_stream(video_path, audio_path)
         await self.save_to_video(output_path)
-        
+
+
 class VadLatentSync:
     """Voice Activity Detection wrapper for LatentSync.
 

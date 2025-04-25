@@ -22,7 +22,10 @@ class FaceInference(MultiThreadInference[np.ndarray, LipsyncMetadata]):
     def infer_task(self, model: FaceProcessor, image: np.ndarray) -> LipsyncMetadata:
         # Apply Gaussian blur with kernel size 3x3 before face detection
         image = cv2.GaussianBlur(image, (3, 3), 0)
-        return model.prepare_face(image)
+        try:
+            return model.prepare_face(image)
+        except Exception:
+            return LipsyncMetadata(original_frame=image)
     
     def push_frame(self, frame: np.ndarray):
         self.add_one_task(frame)
