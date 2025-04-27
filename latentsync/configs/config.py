@@ -42,7 +42,7 @@ class LipsyncConfig:
     video_fps = 25
     samples_per_frame = int(16000 / 25)
     # only for parallel inference
-    audio_batch_size = 20
+    audio_batch_size = 16
 
     # Frame parameters
     num_frames = 8

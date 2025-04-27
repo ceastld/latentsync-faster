@@ -39,7 +39,7 @@ class LatentSyncInference:
         self.lipsync_model.wait_worker_loaded()
         self.face_model = FaceInference(context=context, worker_timeout=worker_timeout)
         self.face_model.start_workers()
-        self.audio_model = AudioBatchInference(context=context, worker_timeout=worker_timeout)
+        self.audio_model = AudioBatchInference(context=context, worker_timeout=worker_timeout, use_vad=context.use_vad)
         self.audio_model.start_workers()
         self.lipsync_restore = LipsyncRestore(context=context, worker_timeout=worker_timeout)
         self.lipsync_restore.start_workers()
@@ -215,9 +215,10 @@ class LatentSync:
         num_frames: int = None,
         checkpoint_dir: str = None,
         immediate_frames: int = 25,
+        use_vad: bool = True,
         **kwargs,
     ):
-        self.context = LipsyncContext.from_version(version, num_frames=num_frames, checkpoint_dir=checkpoint_dir, **kwargs)
+        self.context = LipsyncContext.from_version(version, num_frames=num_frames, checkpoint_dir=checkpoint_dir, use_vad=use_vad, **kwargs)
         self.enable_progress = enable_progress
         self.max_input_fps = max_input_fps
         self.worker_timeout = worker_timeout
@@ -333,8 +334,8 @@ class LatentSync:
         await self.save_to_video(output_path)
 
 class AvatarGenerator:
-    def __init__(self, latent_sync: LatentSync=None, vad: SileroVAD=None):
-        self.latent_sync = latent_sync or LatentSync()
+    def __init__(self, latent_sync: LatentSync=None, vad: SileroVAD=None, use_vad: bool = True):
+        self.latent_sync = latent_sync or LatentSync(use_vad=use_vad)
         self.vad = vad or SileroVAD()
         self._av_queue = asyncio.Queue[AudioVideoFrame]()
         self._video_queue = asyncio.Queue[VideoFrame]()

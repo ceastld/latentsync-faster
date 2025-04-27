@@ -23,7 +23,7 @@ class DetectedFace:
 @dataclass
 class AudioMetadata:
     audio_samples: np.ndarray
-    audio_feature: np.ndarray
+    audio_feature: np.ndarray = None
 
 @dataclass
 class LipsyncMetadata:

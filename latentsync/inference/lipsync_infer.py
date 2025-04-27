@@ -56,8 +56,14 @@ class LipsyncBatchInference(BufferInference[LipsyncMetadata, LipsyncMetadata]):
         assert len(data) <= self.context.num_frames, f"data length should <= num_frames: {self.context.num_frames}"
         # if any face in data is None, return data with None face
         if any(metadata.face is None for metadata in data):
+            self.logger.info("No face, return data with None face")
             for metadata in data:
                 metadata.face = None
+            return data
+        if any(metadata.audio_feature is None for metadata in data):
+            self.logger.info("No audio feature, return data with None audio_feature")
+            for metadata in data:
+                metadata.audio_feature = None
             return data
         return model.process_metadata_batch(data)
 

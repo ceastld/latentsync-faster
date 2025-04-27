@@ -7,6 +7,7 @@ from latentsync.configs.config import GLOBAL_CONFIG
 from latentsync.inference.context import LipsyncContext
 from latentsync.inference.utils import align_audio_features, load_audio_clips, preprocess_audio
 from latentsync.utils.timer import Timer
+from latentsync.utils.vad import SileroVAD
 from latentsync.whisper.whisper.audio import load_audio
 from latentsync.inference.multi_infer import MultiThreadInference, InferenceTask
 from latentsync.inference.buffer_infer import BufferInference
@@ -85,12 +86,15 @@ class AudioInference(MultiThreadInference[np.ndarray, np.ndarray]):
 
 
 class AudioBatchInference(BufferInference[np.ndarray, AudioMetadata]):
-    def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60):
+    def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60, use_vad=True):
         super().__init__(context.audio_batch_size, num_workers, worker_timeout)
         self.context = context
         self.last_audio_samples = None
+        self.use_vad = use_vad
 
     def get_model(self):
+        if self.use_vad:
+            self.vad = SileroVAD()
         return AudioProcessor(self.context)
 
     def push_audio(self, audio: np.ndarray):
@@ -99,7 +103,16 @@ class AudioBatchInference(BufferInference[np.ndarray, AudioMetadata]):
 
     def infer_task(self, model: AudioProcessor, data: List[np.ndarray]):
         audio_samples = np.concatenate(data)
-        audio_features = model.process_audio_with_pre(self.last_audio_samples, audio_samples)
+        is_speech = True
+        if self.use_vad:
+            is_speech = self.vad.detect(audio_samples)
+        
+        if is_speech:
+            audio_features = model.process_audio_with_pre(self.last_audio_samples, audio_samples)
+        else:
+            # no speech, return empty audio features
+            return [AudioMetadata(audio_samples=a) for a in data]
+        
         self.last_audio_samples = audio_samples
         results = []
         for audio_clip, audio_feature in zip(data, audio_features):

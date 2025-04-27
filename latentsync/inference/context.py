@@ -56,6 +56,8 @@ class LipsyncContext:
         # VAE selection
         vae_type: Optional[Literal["tiny", "kl"]] = None,
         checkpoint_dir: str = None,
+        # VAD selection
+        use_vad: bool = True,
     ):
         checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
         self.config = config = self.get_config(checkpoint_dir)
@@ -98,6 +100,9 @@ class LipsyncContext:
         self.vae_type = (vae_type or config.vae_type).lower()
         if self.vae_type not in ["tiny", "kl"]:
             raise ValueError("vae_type must be either 'tiny' or 'kl'")
+
+        # VAD selection
+        self.use_vad = use_vad
 
         # Post initialization
         self._post_init()
