@@ -20,13 +20,13 @@ Example:
         # Push frames (RGB format)
         frame = cv2.imread("input.jpg")
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        model.push_frames(frame)
+        model.push_frame(frame)
         
         # Push audio (16000Hz)
         audio_data = load_audio("input.mp3")  # Your audio loading function
         model.push_audio(audio_data)
         
-        model.model.add_end_task()
+        model.add_end_task()
         
         # Stream results
         frames = []
@@ -50,3 +50,4 @@ from latentsync.inference.audio_infer import AudioProcessor
 from latentsync.inference.context import LipsyncContext, LipsyncContext_v15
 from latentsync.configs.config import GLOBAL_CONFIG
 from latentsync.utils.timer import Timer
+from latentsync.inference._datas import AudioFrame

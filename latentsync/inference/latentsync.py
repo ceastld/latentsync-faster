@@ -1,12 +1,12 @@
 import asyncio
 import os
-from typing import AsyncGenerator, List, Set, Union, TypeVar
+from typing import AsyncGenerator, AsyncIterator, List, Set, Union, TypeVar
 
 import cv2
 import numpy as np
 from tqdm import tqdm
 from latentsync.inference._datas import AudioFrame, DataSegmentEnd, AudioVideoFrame, VideoFrame
-from latentsync.inference._utils import FPSController, SileroVAD, save_async_frames
+from latentsync.inference._utils import FPSController, save_async_frames
 from latentsync.inference.lipsync_infer import LipsyncBatchInference, LipsyncRestore
 from latentsync.inference.audio_infer import AudioBatchInference
 from latentsync.inference.context import LipsyncContext
@@ -14,6 +14,7 @@ from latentsync.inference.face_infer import FaceInference
 from latentsync.inference.multi_infer import MultiThreadInference
 from latentsync.inference.utils import load_audio_clips
 from latentsync.pipelines.metadata import AudioMetadata, LipsyncMetadata
+from latentsync.utils.vad import SileroVAD
 from latentsync.utils.video import cycle_video_stream, LazyVideoWriter
 
 
@@ -59,39 +60,29 @@ class LatentSyncInference:
         for worker in self.workers:
             worker.wait_worker_loaded()
 
-    def push_frame(self, frame: np.ndarray):
-        """Push a frame to the frame controller.
+    def push_frame(self, frame: Union[np.ndarray, List[np.ndarray]]):
+        """Push one or more frames to the frame controller.
 
         Args:
-            frame: np.ndarray, shape: (H, W, 3), dtype: uint8
+            frame: Single frame (np.ndarray with shape: (H, W, 3), dtype: uint8) or 
+                   list of frames
         """
-        self.frame_controller.push_data(VideoFrame(frame=frame))
+        if isinstance(frame, list):
+            video_frames = [VideoFrame(frame=f) for f in frame]
+            self.frame_controller.push_data_batch(video_frames)
+        else:
+            self.frame_controller.push_data(VideoFrame(frame=frame))
 
-    def push_frames(self, frames: List[np.ndarray]):
-        """Push multiple frames to the frame controller.
-
-        Args:
-            frames: List of frames, each with shape: (H, W, 3), dtype: uint8
-        """
-        video_frames = [VideoFrame(frame=f) for f in frames]
-        self.frame_controller.push_data_batch(video_frames)
-
-    def push_audio(self, audio: np.ndarray):
+    def push_audio(self, audio: Union[AudioFrame, List[AudioFrame]]):
         """Push audio data to the audio controller.
 
         Args:
-            audio: np.ndarray, shape: (T,), dtype: float32
+            audio: Single AudioFrame object or list of AudioFrame objects
         """
-        self.audio_controller.push_data(AudioFrame(audio_samples=audio))
-
-    def push_audio_batch(self, audio_batch: List[np.ndarray]):
-        """Push multiple audio segments to the audio controller.
-
-        Args:
-            audio_batch: List of audio segments
-        """
-        audio_frames = [AudioFrame(audio_samples=a) for a in audio_batch]
-        self.audio_controller.push_data_batch(audio_frames)
+        if isinstance(audio, list):
+            self.audio_controller.push_data_batch(audio)
+        else:
+            self.audio_controller.push_data(audio)
 
     async def _stream_frames(self):
         """Stream frames from the frame controller to the face model at the controlled rate."""
@@ -109,6 +100,7 @@ class LatentSyncInference:
                 self.audio_model.add_end_task()
                 break
             else:
+                # AudioModel 需要接收 np.ndarray 数据
                 self.audio_model.push_audio(data.audio_samples)
 
     def stop_workers(self):
@@ -212,32 +204,6 @@ class LatentSync:
         worker_timeout (int, optional): Timeout for worker processes in seconds. Defaults to 60.
         num_frames (int, optional): Maximum number of frames to process. Defaults to None.
         immediate_frames (int, optional): Number of initial frames to output immediately without FPS control. Defaults to 0.
-
-    Examples:
-        Manual frame and audio processing:
-        ```python
-        model = LatentSync(version="v15")
-
-        # Push frames
-        frame = cv2.imread("input.jpg")
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        model.push_frames(frame)  # Single frame
-        model.push_frames([frame] * 10)  # Multiple frames
-
-        # Push audio
-        audio_data = load_audio("input.mp3")  # Your audio loading function
-        model.push_audio(audio_data)
-
-        # Mark end of input
-        model.model.add_end_task()
-
-        # Process results as they come in
-        frames = []
-        async for frame in model.result_stream():
-            frames.append(frame)
-            # You can process each frame as it's generated
-            # process_frame(frame)
-        ```
     """
 
     def __init__(
@@ -248,7 +214,7 @@ class LatentSync:
         worker_timeout: int = 3600,
         num_frames: int = None,
         checkpoint_dir: str = None,
-        immediate_frames: int = 0,
+        immediate_frames: int = 25,
         **kwargs,
     ):
         self.context = LipsyncContext.from_version(version, num_frames=num_frames, checkpoint_dir=checkpoint_dir, **kwargs)
@@ -280,40 +246,25 @@ class LatentSync:
         """Add an end task to the processing pipeline."""
         self.model.add_end_task()
 
-    def push_frames(self, frame: Union[np.ndarray, List[np.ndarray]]):
+    def push_frame(self, frame: Union[np.ndarray, List[np.ndarray]]):
         """Push one or more frames to the processing pipeline.
 
         Args:
-            frame (Union[np.ndarray, List[np.ndarray]]): Single frame or list of frames.
-                Each frame should be a numpy array in RGB format.
+            frame: Single frame (np.ndarray with shape: (H, W, 3), dtype: uint8) or 
+                   list of frames in RGB format.
 
         Raises:
             ValueError: If frame type is not supported.
         """
-        if isinstance(frame, np.ndarray):
-            self.model.push_frame(frame)
-        elif isinstance(frame, list):
-            self.model.push_frames(frame)
-        else:
-            raise ValueError(f"Invalid frame type: {type(frame)}")
+        self.model.push_frame(frame)
 
     def push_audio(self, audio: np.ndarray):
         """Push audio data to the processing pipeline.
 
         Args:
-            audio (np.ndarray): Audio data as numpy array with sample rate 16000.
-                The audio will be automatically padded to match the frame rate.
+            audio: np.ndarray with shape: (T,), dtype: float32, sample rate 16000.
         """
-        spf = self.context.samples_per_frame
-        if len(audio) % spf != 0:
-            audio = np.pad(audio, (0, spf - len(audio) % spf), mode="constant")
-
-        # If audio is a long sequence, split it into chunks corresponding to frames
-        if len(audio) > spf:
-            audio_chunks = [audio[i : i + spf] for i in range(0, len(audio), spf)]
-            self.model.push_audio_batch(audio_chunks)
-        else:
-            self.model.push_audio(audio)
+        self.model.push_audio(AudioFrame.from_numpy(audio, self.context.samples_per_frame))
 
     def push_video_stream(self, video_path, audio_path, max_frames: int = None, max_input_fps: int = 40):
         """Push a video stream with audio for processing.
@@ -334,7 +285,8 @@ class LatentSync:
         # No need to manually control FPS here, just push data as fast as possible
         # The FPS controllers will handle the output rate
         for i, frame in enumerate(cycle_video_stream(video_path, max_frames=max_frames)):
-            self.push_frames(frame)
+            self.push_frame(frame)
+            # Create AudioFrame from numpy array
             self.push_audio(audio_clips[i % len(audio_clips)])
 
             # Small sleep to prevent overwhelming the CPU
@@ -344,42 +296,6 @@ class LatentSync:
 
     def result_stream(self):
         return self.model.result_stream()
-
-    async def get_all_results(self, total: int = None, disable_progress: bool = False):
-        """Get all processed results as a list.
-
-        Args:
-            total (int, optional): Total number of expected results for progress bar.
-                Defaults to None.
-            disable_progress (bool, optional): Whether to disable progress bar.
-                Defaults to False.
-
-        Returns:
-            List: List of all processed frames.
-
-        Note:
-            This method will wait for all processing to complete before returning.
-            For streaming results as they come in, use result_stream() instead.
-
-        Example:
-            ```python
-            # Get all results at once (not recommended for large datasets)
-            results = await model.get_all_results()
-
-            # Get results with progress bar (not recommended for large datasets)
-            results = await model.get_all_results(total=100)
-            ```
-        """
-        pbar = None
-        results = []
-        async for data in self.model.result_stream():
-            results.append(data)
-            if pbar is None:
-                pbar = tqdm(desc="results", total=total, disable=disable_progress)
-            pbar.update(1)
-        if pbar is not None:
-            pbar.close()
-        return results
 
     def push_img_and_audio(self, image_path: str, audio_path: str):
         """Push a single image with corresponding audio.
@@ -393,8 +309,12 @@ class LatentSync:
         audio_clips = load_audio_clips(audio_path, self.context.samples_per_frame)
         frame = cv2.imread(image_path)
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        self.push_frames([frame] * len(audio_clips))
-        self.push_audio(audio_clips)
+        self.push_frame([frame] * len(audio_clips))
+        
+        # Convert and push audio frames
+        audio_frames = [AudioFrame.from_numpy(clip) for clip in audio_clips]
+        self.model.push_audio(audio_frames)
+            
         self.model.add_end_task()
 
     async def save_to_video(self, video_path, save_images=False, total_frames=None):
@@ -412,264 +332,33 @@ class LatentSync:
         self.push_video_stream(video_path, audio_path)
         await self.save_to_video(output_path)
 
+class AvatarGenerator:
+    def __init__(self, latent_sync: LatentSync=None, vad: SileroVAD=None):
+        self.latent_sync = latent_sync or LatentSync()
+        self.vad = vad or SileroVAD()
+        self._av_queue = asyncio.Queue[AudioVideoFrame]()
+        self._video_queue = asyncio.Queue[VideoFrame]()
+        self._audio_queue = asyncio.Queue[AudioFrame]()
 
-class VadLatentSync:
-    """Voice Activity Detection wrapper for LatentSync.
-
-    This class wraps LatentSync and provides additional functionality for skipping
-    silent segments using Voice Activity Detection.
-
-    Args:
-        version (str, optional): Model version to use. Defaults to None.
-        enable_progress (bool, optional): Whether to enable progress bars. Defaults to False.
-        video_fps (int, optional): Target FPS for video processing. Defaults to 25.
-        worker_timeout (int, optional): Timeout for worker processes in seconds. Defaults to 60.
-        num_frames (int, optional): Maximum number of frames to process. Defaults to None.
-        checkpoint_dir (str, optional): Directory for model checkpoints. Defaults to None.
-        immediate_frames (int, optional): Number of initial frames to output immediately without FPS control. Defaults to 0.
-        vad_threshold (float, optional): Threshold for speech detection. Defaults to 0.5.
-        sampling_rate (int, optional): Expected audio sampling rate. Defaults to 16000.
-        **kwargs: Additional arguments passed to LatentSync.
-    """
-
-    def __init__(
-        self,
-        version=None,
-        enable_progress=False,
-        video_fps: int = 25,
-        worker_timeout: int = 3600,
-        num_frames: int = None,
-        checkpoint_dir: str = None,
-        immediate_frames: int = 0,
-        vad_threshold: float = 0.5,
-        sampling_rate: int = 16000,
-        **kwargs,
-    ):
-        # Initialize LatentSync
-        self.latent_sync = LatentSync(
-            version=version,
-            enable_progress=enable_progress,
-            video_fps=video_fps,
-            worker_timeout=worker_timeout,
-            num_frames=num_frames,
-            checkpoint_dir=checkpoint_dir,
-            immediate_frames=immediate_frames,
-            **kwargs,
-        )
-
-        # Initialize Silero VAD
-        self.vad = SileroVAD(threshold=vad_threshold, sampling_rate=sampling_rate)
-        self.vad_threshold = vad_threshold
-        self.sampling_rate = sampling_rate
-
-        # Buffer for frames and processing state
-        self.frame_buffer = []
-        self.result_queue = asyncio.Queue()
-        self.processing_task = None
-        self.is_processing = False
-
-        # Set up processing task
-        self.loop = asyncio.get_event_loop()
-        self.start_processing_task()
-
-    def start_processing_task(self):
-        """Start the background task for processing results."""
-        if self.processing_task is None or self.processing_task.done():
-            self.processing_task = self.loop.create_task(self._process_results())
-
-    async def _process_results(self):
-        """Background task that processes results from LatentSync."""
-        async for result in self.latent_sync.result_stream():
-            await self.result_queue.put(result)
-
-    def push_frames(self, frames: Union[np.ndarray, List[np.ndarray]]):
-        """Buffer frames for processing.
-
-        Args:
-            frames (Union[np.ndarray, List[np.ndarray]]): Frame or list of frames to process.
-        """
-        if isinstance(frames, np.ndarray):
-            self.frame_buffer.append(frames)
-        elif isinstance(frames, list):
-            self.frame_buffer.extend(frames)
-        else:
-            raise ValueError(f"Invalid frame type: {type(frames)}")
-
-    def push_audio(self, audio: np.ndarray):
-        """Push audio and process buffered frames based on VAD result.
-
-        Args:
-            audio (np.ndarray): Audio samples to process.
-        """
-        # Detect if the audio contains speech
-        has_speech = self.vad.is_speech(audio)
-
-        # If audio contains speech, process the buffered frames
-        if has_speech and self.frame_buffer:
-            self.latent_sync.push_frames(self.frame_buffer)
-            self.latent_sync.push_audio(audio)
-            self.is_processing = True
-
-        # Clear frame buffer regardless of speech detection result
-        self.frame_buffer = []
-
-    def push_video_stream(self, video_path, audio_path, max_frames: int = None):
-        """Push a video stream with audio and apply VAD processing.
-
-        Args:
-            video_path (str): Path to the input video file.
-            audio_path (str): Path to the input audio file.
-            max_frames (int, optional): Maximum number of frames to process. Defaults to None.
-        """
-        assert os.path.exists(video_path), f"Video file {video_path} does not exist"
-        assert os.path.exists(audio_path), f"Audio file {audio_path} does not exist"
-
-        # Load audio clips
-        audio_clips = load_audio_clips(audio_path, self.latent_sync.context.samples_per_frame)
-
-        # Process video frames with VAD
-        speech_segments = []
-
-        # First, analyze all audio to find speech segments
-        for i, audio in enumerate(audio_clips):
-            if self.vad.is_speech(audio):
-                speech_segments.append(i)
-
-        # Now process only frames with speech
-        if not speech_segments:
-            # No speech detected, return
-            self.latent_sync.add_end_task()
-            return
-
-        # Group consecutive speech segments
-        grouped_segments = []
-        current_group = [speech_segments[0]]
-
-        for i in range(1, len(speech_segments)):
-            if speech_segments[i] == speech_segments[i - 1] + 1:
-                # Continuous segment
-                current_group.append(speech_segments[i])
-            else:
-                # New segment
-                grouped_segments.append(current_group)
-                current_group = [speech_segments[i]]
-
-        # Add the last group
-        if current_group:
-            grouped_segments.append(current_group)
-
-        # Process each group of speech segments
-        for group in grouped_segments:
-            # Get frames and audio for this group
-            group_frames = []
-            group_audio = []
-
-            for idx in group:
-                if idx < len(audio_clips):
-                    try:
-                        # Get frame for this index
-                        frame_idx = min(idx, max_frames - 1) if max_frames else idx
-                        frame = None
-                        for i, f in enumerate(cycle_video_stream(video_path, max_frames=frame_idx + 1)):
-                            if i == frame_idx:
-                                frame = f
-                                break
-
-                        if frame is not None:
-                            group_frames.append(frame)
-                            group_audio.append(audio_clips[idx])
-                    except Exception as e:
-                        print(f"Error accessing frame {idx}: {e}")
-
-            # Process this group
-            if group_frames and group_audio:
-                self.latent_sync.push_frames(group_frames)
-                self.latent_sync.push_audio(np.concatenate(group_audio))
-                self.is_processing = True
-
-        self.latent_sync.add_end_task()
-
-    def push_img_and_audio(self, image_path: str, audio_path: str):
-        """Push a single image with corresponding audio.
-
-        Args:
-            image_path (str): Path to the image file
-            audio_path (str): Path to the audio file
-        """
-        assert os.path.exists(image_path), f"Image file {image_path} does not exist"
-        assert os.path.exists(audio_path), f"Audio file {audio_path} does not exist"
-
-        # Load image
-        frame = cv2.imread(image_path)
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        # Load audio clips
-        audio_clips = load_audio_clips(audio_path, self.latent_sync.context.samples_per_frame)
-
-        # Detect speech in each audio clip
-        speech_indices = []
-        for i, audio in enumerate(audio_clips):
-            if self.vad.is_speech(audio):
-                speech_indices.append(i)
-
-        # Only process frames with speech
-        if speech_indices:
-            speech_audio = np.concatenate([audio_clips[i] for i in speech_indices])
-            speech_frames = [frame] * len(speech_indices)
-
-            self.latent_sync.push_frames(speech_frames)
-            self.latent_sync.push_audio(speech_audio)
-            self.is_processing = True
-
-        self.latent_sync.add_end_task()
-
-    def close(self):
-        """Stop all worker processes."""
-        if self.processing_task:
-            self.processing_task.cancel()
-        self.latent_sync.stop_workers()
-
-    def add_end_task(self):
-        """Add an end task to the processing pipeline."""
-        if self.frame_buffer:
-            # Process any remaining frames if needed
-            # This is a simple approach - for real applications,
-            # you might want to check if these frames contain speech
-            self.latent_sync.push_frames(self.frame_buffer)
-            self.frame_buffer = []
-        self.latent_sync.add_end_task()
-
-    async def result_stream(self):
-        """Get an async iterator for streaming results as they are generated.
-
-        This stream will only yield results for audio segments that contained speech.
-
-        Yields:
-            Frame data from processed speech segments.
-        """
-        self.start_processing_task()  # Ensure processing task is running
-
-        while self.is_processing or not self.result_queue.empty():
-            try:
-                result = await self.result_queue.get()
-                yield result
-            except asyncio.CancelledError:
-                break
-
-    async def get_all_results(self, total: int = None, disable_progress: bool = False):
-        """Get all processed results as a list."""
-        results = []
-        pbar = None
-
-        if total and not disable_progress:
-            pbar = tqdm(desc="results", total=total)
-
-        async for result in self.result_stream():
-            results.append(result)
-            if pbar:
-                pbar.update(1)
-
-        if pbar:
-            pbar.close()
-
-        return results
+    async def start(self):
+        async def aaa():
+            pass
+        pass
+    
+    async def push_audio(self, audio: AudioFrame):
+        audio.is_speech = self.vad.detect(audio.audio_samples)
+        await self._audio_queue.put(audio)
+    
+    async def push_frame(self, frame: VideoFrame):
+        await self._video_queue.put(frame)
+    
+    async def __aiter__(self)-> AsyncIterator[AudioVideoFrame | DataSegmentEnd]:
+        return self.stream_impl()
+    
+    async def stream_impl(self):
+        
+        pass
+    
+    async def close(self):
+        pass
+    
