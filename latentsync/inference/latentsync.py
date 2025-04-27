@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 from latentsync.inference._datas import AudioFrame, DataSegmentEnd, AudioVideoFrame, VideoFrame
+from latentsync.inference._types import VideoGenerator
 from latentsync.inference._utils import FPSController, save_async_frames
 from latentsync.inference.lipsync_infer import LipsyncBatchInference, LipsyncRestore
 from latentsync.inference.audio_infer import AudioBatchInference
@@ -191,7 +192,7 @@ class LatentSyncInference:
         self.audio_controller.push_data(DataSegmentEnd())
 
 
-class LatentSync:
+class LatentSync(VideoGenerator):
     """A class for lip-syncing videos using latent diffusion models.
 
     This class provides methods for processing frames and audio data manually.
@@ -295,7 +296,7 @@ class LatentSync:
 
         self.model.add_end_task()
 
-    def result_stream(self):
+    def result_stream(self) -> AsyncGenerator[AudioVideoFrame, None]:
         return self.model.result_stream()
 
     def push_img_and_audio(self, image_path: str, audio_path: str):
