@@ -149,6 +149,7 @@ def data_to_numpy(data) -> Any:
 class LazyVideoWriter:
     def __init__(self, save_path, fps=25.0, save_images=False, image_dir=None, audio_sr=16000):
         self.writer = None
+        save_path = str(save_path)
         assert save_path.endswith(".mp4"), "Only support mp4 format"
         self.save_path = save_path
         self.save_images = save_images

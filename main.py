@@ -20,7 +20,7 @@ async def test_obama(model: LatentSync):
 
 
 async def main():
-    model = LatentSync(enable_progress=True, vae_type="tiny")
+    model = LatentSync(enable_progress=True, vae_type="kl")
     await test_obama(model)
 
 
