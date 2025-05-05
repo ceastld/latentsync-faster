@@ -12,16 +12,20 @@ logger = logging.getLogger(__name__)
 
 async def test_obama(model: LatentSync):
     example = GLOBAL_CONFIG.inference.obama
-    await model.inference(
-        example.video_path,
-        example.audio_path,
-        example.video_out_path,
-    )
+    model.push_video_stream(example.video_path, example.audio_path, max_frames=500)
+    await model.save_to_video(example.video_out_path, total_frames=500)
+    # await model.inference(
+    #     example.video_path,
+    #     example.audio_path,
+    #     example.video_out_path,
+    # )
 
 
 async def main():
-    model = LatentSync(enable_progress=True, vae_type="kl")
+    model = LatentSync(enable_progress=True, vae_type="kl", use_vad=True)
     await test_obama(model)
+    # model.setup_model()
+    # await test_obama(model)
 
 
 if __name__ == "__main__":

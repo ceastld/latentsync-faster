@@ -268,7 +268,7 @@ class LatentSync(VideoGenerator):
         """
         self.model.push_audio(AudioFrame.from_numpy(audio, self.context.samples_per_frame))
 
-    def push_video_stream(self, video_path, audio_path, max_frames: int = None, max_input_fps: int = 40):
+    def push_video_stream(self, video_path, audio_path, max_frames: int = None, max_input_fps: int = 30):
         """Push a video stream with audio for processing.
 
         Args:
