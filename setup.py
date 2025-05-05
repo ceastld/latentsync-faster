@@ -16,6 +16,16 @@ def read_version():
     except Exception as e:
         raise RuntimeError("Failed to read version from %s: %s" % (version_file, str(e)))
 
+# Read requirements from requirements.txt
+def read_requirements():
+    req_file = os.path.join(os.path.dirname(__file__), "requirements.txt")
+    try:
+        with open(req_file, "r") as f:
+            requirements = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+            return requirements
+    except Exception as e:
+        raise RuntimeError("Failed to read requirements from %s: %s" % (req_file, str(e)))
+
 setup(
     name="latentsync",
     version=read_version(),
@@ -29,33 +39,7 @@ setup(
     package_data={
         "latentsync": ["**/*"]
     },
-    install_requires=[
-        "torch>=2.2.1",
-        "torchvision>=0.17.1",
-        "torchaudio>=2.2.1",
-        "accelerate>=1.4.0",
-        "decord>=0.6.0",
-        "diffusers>=0.32.2",
-        "einops>=0.8.1",
-        "insightface>=0.7.0",
-        "ffmpeg_python>=0.2.0",
-        "imageio>=2.37.0",
-        "librosa>=0.10.2",
-        "matplotlib>=3.10.1",
-        "more_itertools>=10.6.0",
-        "omegaconf>=2.3.0",
-        "onnxruntime-gpu>=1.21.0",
-        "opencv_contrib_python>=4.11.0",
-        "opencv_python>=4.11.0",
-        "packaging>=24.2",
-        "Pillow>=11.1.0",
-        "regex>=2024.11.6",
-        "scipy>=1.15.2",
-        "soundfile>=0.13.1",
-        "tqdm>=4.67.1",
-        "transformers>=4.49.0",
-        "xformers>=0.0.29",
-    ],
+    install_requires=read_requirements(),
     entry_points={
         "console_scripts": [
             "latentsync-infer=latentsync.inference.face_infer:main",

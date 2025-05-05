@@ -48,3 +48,5 @@ wandb/
 test.py
 build/
 testset
+.env
+.env.local
