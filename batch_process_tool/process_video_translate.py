@@ -20,7 +20,8 @@ import requests
 # --- Configuration Constants ---
 VIDEO_EXTENSIONS = ('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.webm', '.mpeg', '.mpg')
 DEFAULT_TARGET_FPS = 25
-DEFAULT_TARGET_LANGS = "zh,en,es,fr,ru,ja,ko,de,it,uk,pt,pt-br,tr,hi" # Example default languages
+# DEFAULT_TARGET_LANGS = "zh,en,es,fr,ru,ja,ko,de,it,uk,pt,pt-br,tr,hi" # Example default languages
+DEFAULT_TARGET_LANGS = "zh,ja,ko"
 
 # Gemini/ElevenLabs API Keys (It's better to get these from args or env vars)
 # GEMINI_API_KEY = "YOUR_GEMINI_API_KEY" 
@@ -68,23 +69,32 @@ DEFAULT_ELEVENLABS_VOICE_ID = elevenlabs_voices.get("en", {}).get("male", "1SM7G
 DEFAULT_ELEVENLABS_LANGUAGE = "en"
 
 # Target language names for Gemini prompts (Copied from speech_translator_tts.py)
+# TARGET_LANGUAGE_NAMES = {
+#     "zh": "Mandarin Chinese",
+#     "en": "English",
+#     "ru": "Russian",
+#     "fr": "French",
+#     "es": "Spanish",
+#     "ja": "Japanese",
+#     "ko": "Korean",
+#     "de": "German",
+#     "it": "Italian",
+#     "uk": "Ukrainian",
+#     "pt": "Portuguese",
+#     "pt-br": "Portuguese (Brazil)",
+#     "tr": "Turkish",
+#     "hi": "Hindi",
+#     # Add more if needed, ensure they match keys in elevenlabs_voices if using ElevenLabs
+# }
 TARGET_LANGUAGE_NAMES = {
     "zh": "Mandarin Chinese",
-    "en": "English",
-    "ru": "Russian",
-    "fr": "French",
-    "es": "Spanish",
     "ja": "Japanese",
     "ko": "Korean",
-    "de": "German",
-    "it": "Italian",
-    "uk": "Ukrainian",
-    "pt": "Portuguese",
-    "pt-br": "Portuguese (Brazil)",
-    "tr": "Turkish",
-    "hi": "Hindi",
-    # Add more if needed, ensure they match keys in elevenlabs_voices if using ElevenLabs
 }
+
+# --- ElevenLabs API Related Constants --- Added
+ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1"
+ADD_VOICE_ENDPOINT = f"{ELEVENLABS_API_URL}/voices/add"
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -117,6 +127,36 @@ def check_ffmpeg():
         logger.error(f"检查 ffmpeg 时发生未知错误: {e}")
         return False
 
+# 获取视频时长（秒）
+def get_video_duration(video_filepath: Path) -> Optional[float]:
+    """使用 ffmpeg 获取视频时长（秒）"""
+    command = [
+        'ffmpeg',
+        '-i', str(video_filepath),
+        '-show_entries', 'format=duration',
+        '-v', 'quiet',
+        '-of', 'csv=p=0',
+    ]
+    
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+        duration_str = result.stdout.strip()
+        if not duration_str:
+            logger.error(f"无法从视频中获取时长信息: {video_filepath}")
+            return None
+            
+        duration = float(duration_str)
+        logger.info(f"视频时长: {duration:.2f}秒 - {video_filepath.name}")
+        return duration
+    except subprocess.CalledProcessError as e:
+        logger.error(f"获取视频时长时发生错误: {e}")
+        return None
+    except (ValueError, TypeError) as e:
+        logger.error(f"解析视频时长时发生错误: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"获取视频时长时发生未知错误: {e}")
+        return None
 
 # Function to convert video FPS using ffmpeg
 def convert_video_fps(input_path: Path, output_path: Path, target_fps: int) -> bool:
@@ -262,6 +302,119 @@ def write_output(output_file_path: Path, content: str):
         logger.error(f"Failed to write output file {output_file_path}: {e}")
     except Exception as e:
         logger.error(f"An unexpected error occurred writing to {output_file_path}: {e}", exc_info=True)
+
+
+# --- Voice Cloning Functions (Added from process_timestamped_text.py) ---
+
+def extract_audio_from_video(video_path: Path, output_audio_path: Path) -> bool:
+    """从视频中提取音频，保存为MP3格式 (For cloning)"""
+    logger.info(f"为声音克隆从视频 {video_path} 提取音频...")
+    
+    command = [
+        "ffmpeg",
+        "-i", str(video_path),
+        "-vn",  # 不要视频
+        "-codec:a", "libmp3lame",  # 使用MP3编码
+        "-q:a", "2",  # 高质量MP3
+        "-y",  # 覆盖输出文件（如果存在）
+        str(output_audio_path)
+    ]
+    
+    try:
+        output_audio_path.parent.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(command, check=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+        logger.info(f"成功提取克隆用音频到 {output_audio_path}")
+        if not output_audio_path.exists() or output_audio_path.stat().st_size == 0:
+             logger.error(f"克隆音频提取似乎成功，但输出文件 {output_audio_path.name} 不存在或为空。")
+             return False
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"克隆音频提取失败: {e}")
+        logger.error(f"错误输出: {e.stderr}")
+        # Clean up potentially empty file
+        if output_audio_path.exists() and output_audio_path.stat().st_size == 0:
+             try: output_audio_path.unlink()
+             except OSError: pass
+        return False
+    except Exception as e:
+        logger.error(f"克隆音频提取时发生未知错误: {e}")
+        return False
+
+def clone_voice_from_audio(api_key: str, voice_name: str, audio_file_path: Path) -> Optional[str]:
+    """使用音频文件克隆声音，返回克隆的声音ID"""
+    if not os.path.exists(audio_file_path) or audio_file_path.stat().st_size == 0:
+        logger.error(f"克隆音频文件不存在或为空: {audio_file_path}")
+        return None
+    
+    logger.info(f"使用音频 {audio_file_path} 开始克隆声音 '{voice_name}'...")
+    
+    headers = { "xi-api-key": api_key }
+    
+    with open(audio_file_path, 'rb') as f:
+        files = [('files', (audio_file_path.name, f))] # Pass filename
+        data = { "name": voice_name }
+        
+        try:
+            response = requests.post(ADD_VOICE_ENDPOINT, headers=headers, data=data, files=files, timeout=180) # Add timeout
+            
+            if response.status_code == 200:
+                result = response.json()
+                voice_id = result.get("voice_id")
+                if voice_id:
+                    logger.info(f"声音 '{voice_name}' 克隆成功! Voice ID: {voice_id}")
+                    return voice_id
+                else:
+                    logger.error("声音克隆成功，但未在响应中找到voice_id")
+                    logger.error(f"响应内容: {response.text}")
+                    return None
+            elif response.status_code == 400 and "quota" in response.text.lower():
+                 logger.error(f"声音克隆失败：很可能是达到了克隆配额。响应: {response.text}")
+                 return None
+            elif response.status_code == 400 and "instant voice cloning requires a paid subscription" in response.text.lower():
+                 logger.error(f"声音克隆失败：即时声音克隆需要付费订阅。响应: {response.text}")
+                 return None
+            elif response.status_code == 422 and "cannot be used for cloning" in response.text.lower():
+                 logger.error(f"声音克隆失败：提供的音频文件无法用于克隆 (可能质量太低或包含非语音内容)。响应: {response.text}")
+                 return None
+            else:
+                logger.error(f"声音克隆失败，状态码: {response.status_code}")
+                logger.error(f"响应内容: {response.text}")
+                return None
+                
+        except requests.exceptions.Timeout:
+             logger.error("声音克隆请求超时。")
+             return None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"声音克隆请求错误: {e}")
+            return None
+        except Exception as e:
+             logger.error(f"克隆声音时发生意外错误: {e}", exc_info=True)
+             return None
+
+def update_voice_ids_with_cloned(cloned_voice_id: str) -> None:
+    """使用克隆的声音ID更新所有语言的声音ID"""
+    global elevenlabs_voices, DEFAULT_ELEVENLABS_VOICE_ID
+    
+    if not cloned_voice_id:
+         logger.warning("尝试使用空的克隆声音ID进行更新，跳过。")
+         return
+         
+    # 更新所有语言使用相同的克隆声音ID
+    updated_langs = []
+    for lang in elevenlabs_voices:
+        if "male" in elevenlabs_voices[lang]: 
+            elevenlabs_voices[lang]["male"] = cloned_voice_id
+            updated_langs.append(f"{lang}-male")
+        if "female" in elevenlabs_voices[lang]: 
+            elevenlabs_voices[lang]["female"] = cloned_voice_id
+            updated_langs.append(f"{lang}-female")
+            
+    # 更新默认声音ID
+    DEFAULT_ELEVENLABS_VOICE_ID = cloned_voice_id
+    
+    logger.info(f"所有声音ID已更新为克隆的声音ID: {cloned_voice_id}")
+    logger.debug(f"更新的条目: {updated_langs}")
+    logger.debug(f"更新后的声音配置: {elevenlabs_voices}")
 
 
 # --- API Processing Classes (Copied/Adapted from speech_translator_tts.py) ---
@@ -479,17 +632,33 @@ class ElevenLabsTTS:
         self._api_key = api_key
         # self._session = requests.Session() # Optionally use a session
 
-    def run_tts(self, text: str, language_code: str, voice_id: str, output_wav_path: Path, voice_settings: Optional[Dict[str, Any]] = None) -> Optional[str]:
-        """Generates speech synchronously using ElevenLabs and saves as WAV."""
+    def run_tts(self, text: str, language_code: str, voice_id: str, output_wav_path: Path, voice_settings: Optional[Dict[str, Any]] = None, speaking_rate: float = 1.0) -> Optional[Tuple[str, float]]:
+        """Generates speech synchronously using ElevenLabs and saves as WAV.
+        
+        Args:
+            speaking_rate: Speech rate multiplier (0.5-2.0)
+            
+        Returns:
+            Tuple of (output_path_str, audio_duration_seconds) or None on failure
+        """
         if not text: logger.warning("TTS called with empty text."); return None
 
         tts_url = f"{self.BASE_URL}/text-to-speech/{voice_id}/stream?output_format=mp3_44100_128"
         headers = { "Content-Type": "application/json", "xi-api-key": self._api_key }
         model_id = "eleven_multilingual_v2" if language_code != 'en' else "eleven_english_v2"
-        payload = {"text": text, "model_id": model_id}
+        
+        # 添加speaking_rate参数
+        model_settings = {"speaking_rate": speaking_rate}
+        
+        payload = {
+            "text": text, 
+            "model_id": model_id,
+            "model_settings": model_settings
+        }
+        
         if voice_settings: payload["voice_settings"] = voice_settings
 
-        logger.info(f"Starting TTS request to ElevenLabs. Voice: {voice_id}, Model: {model_id}, Lang: {language_code}. Output: {output_wav_path}")
+        logger.info(f"Starting TTS request to ElevenLabs. Voice: {voice_id}, Model: {model_id}, Lang: {language_code}, Speaking Rate: {speaking_rate}. Output: {output_wav_path}")
 
         temp_mp3_path = None
         try:
@@ -520,8 +689,12 @@ class ElevenLabsTTS:
                     logger.info(f"Converting temporary MP3 {temp_mp3_path} to WAV {output_wav_path}")
                     sound = AudioSegment.from_mp3(temp_mp3_path)
                     sound.export(output_wav_path, format="wav")
-                    logger.info(f"Successfully converted to WAV: {output_wav_path}")
-                    return str(output_wav_path)
+                    
+                    # 获取音频时长
+                    audio_duration = sound.duration_seconds
+                    logger.info(f"Successfully converted to WAV: {output_wav_path} (Duration: {audio_duration:.2f}s)")
+                    
+                    return str(output_wav_path), audio_duration
 
                 except Exception as e: # Handle download/conversion errors
                     logger.error(f"Error during MP3 download or conversion: {e}", exc_info=True); return None
@@ -554,8 +727,9 @@ def process_translation_and_tts_for_lang( # Synchronous
     gemini_translator_client: GeminiTextTranslator,
     elevenlabs_tts_client: ElevenLabsTTS,
     elevenlabs_voice_type: str,
-    elevenlabs_custom_voice_id: Optional[str],
-    overwrite_audio: bool
+    cloned_voice_id: Optional[str],
+    overwrite_audio: bool,
+    video_duration: Optional[float] = None
 ) -> bool:
     """Handles translation and TTS synchronously. No text saving.
        Uses specified voice type or custom ID.
@@ -578,12 +752,12 @@ def process_translation_and_tts_for_lang( # Synchronous
 
     # --- 2. Synthesize Speech (TTS) --- 
     logger.info(f"Synthesizing speech for {target_lang_name}... Output: {output_wav_path.name}")
-    voice_id_to_use = elevenlabs_custom_voice_id
-    chosen_logic = "custom ID" 
+    voice_id_to_use = cloned_voice_id
+    chosen_logic = "cloned voice" 
     effective_lang_code = target_lang_code
 
     if voice_id_to_use:
-        logger.info(f"Using custom voice ID specified: {voice_id_to_use}")
+        logger.info(f"Using cloned voice ID specified: {voice_id_to_use}")
     else:
         logger.info(f"Attempting to find voice for type: '{elevenlabs_voice_type}' for language '{target_lang_code}'")
         chosen_logic = f"voice type arg ({elevenlabs_voice_type})"
@@ -627,19 +801,94 @@ def process_translation_and_tts_for_lang( # Synchronous
          return False
 
     voice_settings = {"stability": 0.6, "similarity_boost": 0.75}
-
-    # Synchronous call
-    tts_output_path_str = elevenlabs_tts_client.run_tts(
-        text=translated_text, language_code=effective_lang_code, voice_id=voice_id_to_use,
-        output_wav_path=output_wav_path, voice_settings=voice_settings
-    )
-
-    if tts_output_path_str:
-        logger.info(f"TTS successful (Logic: {chosen_logic}): {tts_output_path_str}")
+    
+    # 如果没有视频时长，直接使用默认语速生成音频
+    if not video_duration:
+        logger.info(f"没有提供视频时长，使用默认语速生成音频")
+        tts_result = elevenlabs_tts_client.run_tts(
+            text=translated_text, 
+            language_code=effective_lang_code, 
+            voice_id=voice_id_to_use,
+            output_wav_path=output_wav_path, 
+            voice_settings=voice_settings
+        )
+        
+        if not tts_result:
+            logger.error(f"TTS失败 (voice: {voice_id_to_use})")
+            return False
+            
+        tts_output_path_str, _ = tts_result
+        logger.info(f"TTS成功完成: {tts_output_path_str}")
         return True
-    else:
-        logger.error(f"TTS failed (Logic: {chosen_logic}, Voice: {voice_id_to_use})")
+    
+    # 创建临时音频文件路径用于第一次TTS尝试
+    temp_output_wav_path = output_wav_path.with_suffix('.temp.wav')
+    
+    # 第一步：先用默认语速生成音频，获取时长
+    logger.info(f"第一步：使用默认语速 (1.0) 生成音频以测量时长")
+    default_speaking_rate = 1.0
+    tts_result = elevenlabs_tts_client.run_tts(
+        text=translated_text, 
+        language_code=effective_lang_code, 
+        voice_id=voice_id_to_use,
+        output_wav_path=temp_output_wav_path, 
+        voice_settings=voice_settings,
+        speaking_rate=default_speaking_rate
+    )
+    
+    if not tts_result:
+        logger.error(f"第一次TTS生成失败 (语速: {default_speaking_rate})")
         return False
+        
+    temp_audio_path_str, audio_duration = tts_result
+    
+    # 第二步：计算调整后的语速
+    duration_ratio = video_duration / audio_duration
+    
+    # 限制语速在合理范围内 (0.5-2.0)
+    adjusted_speaking_rate = max(0.5, min(2.0, default_speaking_rate * duration_ratio))
+    
+    logger.info(f"第二步：基于时长比例调整语速 - 视频: {video_duration:.2f}秒, 音频: {audio_duration:.2f}秒")
+    logger.info(f"计算得到的语速比例: {duration_ratio:.3f}, 调整后语速: {adjusted_speaking_rate:.3f}")
+    
+    # 如果调整语速与默认语速相差不大，就直接使用已生成的音频
+    if abs(adjusted_speaking_rate - default_speaking_rate) < 0.05:
+        logger.info(f"调整后语速 ({adjusted_speaking_rate:.3f}) 与默认语速相差不大，将使用已生成的音频")
+        try:
+            # 重命名临时文件为最终文件
+            Path(temp_audio_path_str).rename(output_wav_path)
+            logger.info(f"TTS成功完成 (语速: {default_speaking_rate}): {output_wav_path}")
+            return True
+        except Exception as e:
+            logger.error(f"重命名临时音频文件时发生错误: {e}")
+            return False
+    
+    # 第三步：使用调整后的语速重新生成音频
+    try:
+        # 删除临时音频文件
+        Path(temp_audio_path_str).unlink()
+        logger.debug(f"已删除临时音频文件: {temp_audio_path_str}")
+    except Exception as e:
+        logger.warning(f"删除临时音频文件时发生错误: {e}")
+    
+    logger.info(f"第三步：使用调整后的语速重新生成音频 (语速: {adjusted_speaking_rate:.3f})")
+    final_tts_result = elevenlabs_tts_client.run_tts(
+        text=translated_text, 
+        language_code=effective_lang_code, 
+        voice_id=voice_id_to_use,
+        output_wav_path=output_wav_path, 
+        voice_settings=voice_settings,
+        speaking_rate=adjusted_speaking_rate
+    )
+    
+    if not final_tts_result:
+        logger.error(f"第二次TTS生成失败 (语速: {adjusted_speaking_rate:.3f})")
+        return False
+        
+    final_path_str, final_duration = final_tts_result
+    logger.info(f"TTS成功完成 (语速: {adjusted_speaking_rate:.3f}): {final_path_str} (最终时长: {final_duration:.2f}秒)")
+    
+    return True
 
 
 def process_video_file( # Synchronous
@@ -651,7 +900,7 @@ def process_video_file( # Synchronous
     gemini_translator_client: GeminiTextTranslator, 
     elevenlabs_tts_client: ElevenLabsTTS, 
     elevenlabs_voice_type: str, 
-    elevenlabs_custom_voice_id: Optional[str],
+    cloned_voice_id: Optional[str],
     overwrite_video: bool,
     overwrite_audio: bool
 ):
@@ -662,6 +911,13 @@ def process_video_file( # Synchronous
     output_subdir = output_root_dir / base_filename 
     output_subdir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Output will be saved to: {output_subdir}")
+
+    # 获取视频时长
+    video_duration = get_video_duration(video_file_path)
+    if video_duration:
+        logger.info(f"获取到视频时长: {video_duration:.2f}秒")
+    else:
+        logger.warning(f"无法获取视频时长，将不能进行语速调整")
 
     # 1. Convert Video FPS (Synchronous call via subprocess.run)
     output_video_path = output_subdir / video_filename 
@@ -721,8 +977,9 @@ def process_video_file( # Synchronous
                      gemini_translator_client=gemini_translator_client,
                      elevenlabs_tts_client=elevenlabs_tts_client,
                      elevenlabs_voice_type=elevenlabs_voice_type,
-                     elevenlabs_custom_voice_id=elevenlabs_custom_voice_id,
-                     overwrite_audio=overwrite_audio
+                     cloned_voice_id=cloned_voice_id,
+                     overwrite_audio=overwrite_audio,
+                     video_duration=video_duration
                  )
                  if success: successful_translations += 1
                  languages_processed.append(lang_code if success else f"{lang_code}(failed)")
@@ -751,8 +1008,8 @@ def main(): # Synchronous
     # Update description
     parser = argparse.ArgumentParser(description="Process video files directly in a folder: convert FPS, extract audio, translate audio, and synthesize speech synchronously.")
     # Update input_dir help text
-    parser.add_argument("--input_dir", type=str, help="Directory containing video files to process.") 
-    parser.add_argument("--output_dir", type=str, help="Directory to save the processed results (in subfolders named after videos).")
+    parser.add_argument("input_dir", type=str, help="Directory containing video files to process.") 
+    parser.add_argument("output_dir", type=str, help="Directory to save the processed results (in subfolders named after videos).")
     parser.add_argument("--target_fps", type=int, default=DEFAULT_TARGET_FPS, help=f"Target video frame rate (default: {DEFAULT_TARGET_FPS}).")
     parser.add_argument("--target_langs", type=str, default=DEFAULT_TARGET_LANGS,
                         help=f"Comma-separated list of target language codes for translation (e.g., 'zh,fr,es', default: {DEFAULT_TARGET_LANGS}). See TARGET_LANGUAGE_NAMES.")
@@ -764,9 +1021,9 @@ def main(): # Synchronous
     parser.add_argument("--gemini_translate_model", type=str, default="gemini-1.5-flash-latest", help="Gemini model for Translation.")
     # Update help text for voice type/id
     parser.add_argument("--elevenlabs_voice_type", type=str, default="male", choices=["male", "female"], 
-                        help="Voice type (male/female) for ElevenLabs TTS. Used if custom voice ID is not provided. Default: male.") 
-    parser.add_argument("--elevenlabs_custom_voice_id", type=str, default=None, 
-                        help="Specific ElevenLabs Voice ID to use (overrides voice_type selection). Default: None.") 
+                        help="Voice type (male/female) for ElevenLabs TTS. Used if voice cloning is skipped or fails. Default: male.") 
+    parser.add_argument("--clone_source_video", type=str, default=None, 
+                        help="Path to the video file to use for voice cloning. If provided, the script will attempt to clone this voice and use it for all TTS outputs. Overrides --elevenlabs_voice_type if successful.") 
     parser.add_argument("--overwrite_video", action="store_true", help="Overwrite existing video files in the output directory.")
     parser.add_argument("--overwrite_audio", action="store_true", help="Overwrite existing translated audio files (wav) in the output directory.")
 
@@ -795,7 +1052,7 @@ def main(): # Synchronous
     logger.info(f"Target FPS: {args.target_fps}")
     logger.info(f"Target Languages: {valid_target_langs}")
     logger.info(f"Voice Type: {args.elevenlabs_voice_type}")
-    logger.info(f"Custom Voice ID: {args.elevenlabs_custom_voice_id or 'Not specified'}")
+    logger.info(f"Clone Source Video: {args.clone_source_video or 'Not specified'}")
     logger.info(f"Overwrite Video: {args.overwrite_video}")
     logger.info(f"Overwrite Audio: {args.overwrite_audio}")
 
@@ -806,6 +1063,45 @@ def main(): # Synchronous
         gemini_translator = GeminiTextTranslator(api_key=args.gemini_api_key, model=args.gemini_translate_model)
         elevenlabs_tts = ElevenLabsTTS(api_key=args.elevenlabs_api_key) # No session needed
         logger.info("API clients initialized successfully.")
+
+        # --- Perform Voice Cloning (if requested) --- Added cloning step
+        cloned_voice_id: Optional[str] = None
+        temp_clone_audio_path: Optional[Path] = None 
+        if args.clone_source_video:
+            clone_video_path = Path(args.clone_source_video)
+            if not clone_video_path.is_file():
+                 logger.error(f"克隆源视频文件不存在: {clone_video_path}. 跳过克隆。")
+            else:
+                 logger.info(f"--- 开始声音克隆，源视频: {clone_video_path.name} ---")
+                 # Create a temporary path for extracted audio
+                 temp_clone_audio_dir = output_path / "temp_cloning"
+                 temp_clone_audio_dir.mkdir(parents=True, exist_ok=True)
+                 temp_clone_audio_path = temp_clone_audio_dir / f"{clone_video_path.stem}_clone_audio.mp3"
+                 
+                 if extract_audio_from_video(clone_video_path, temp_clone_audio_path):
+                      voice_name = f"Cloned Voice from {clone_video_path.name}"
+                      cloned_voice_id = clone_voice_from_audio(args.elevenlabs_api_key, voice_name, temp_clone_audio_path)
+                      
+                      if cloned_voice_id:
+                           logger.info(f"声音克隆成功！将使用克隆的声音 ID: {cloned_voice_id}")
+                           update_voice_ids_with_cloned(cloned_voice_id) # Update global voice dict
+                      else:
+                           logger.error("声音克隆失败，将使用默认或指定的语音类型。")
+                 else:
+                      logger.error("无法从源视频提取音频用于克隆。")
+
+                 # Clean up temporary cloning audio file regardless of success
+                 if temp_clone_audio_path and temp_clone_audio_path.exists():
+                      try: 
+                           temp_clone_audio_path.unlink()
+                           logger.info(f"已删除临时克隆音频文件: {temp_clone_audio_path}")
+                           # Attempt to remove the temp dir if empty
+                           try: temp_clone_audio_dir.rmdir() 
+                           except OSError: pass # Ignore if not empty
+                      except OSError as e: logger.warning(f"无法删除临时克隆音频文件 {temp_clone_audio_path}: {e}")
+                 logger.info(f"--- 完成声音克隆尝试 ---")
+        else:
+             logger.info("未指定克隆源视频，将跳过声音克隆步骤。")
 
         # --- Find and Process Video Files Synchronously --- 
         video_files_to_process = []
@@ -843,7 +1139,7 @@ def main(): # Synchronous
                     gemini_translator_client=gemini_translator,
                     elevenlabs_tts_client=elevenlabs_tts,
                     elevenlabs_voice_type=args.elevenlabs_voice_type,
-                    elevenlabs_custom_voice_id=args.elevenlabs_custom_voice_id,
+                    cloned_voice_id=cloned_voice_id,
                     overwrite_video=args.overwrite_video,
                     overwrite_audio=args.overwrite_audio
                 )
