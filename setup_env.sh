@@ -12,7 +12,7 @@ conda activate latentsync
 conda install -y -c conda-forge ffmpeg
 
 # pip install numpy==2.2.3
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 
 pip install numba
 
@@ -23,9 +23,13 @@ pip install -r requirements.txt
 sudo apt -y install libgl1
 
 # Download all the checkpoints and testdata from HuggingFace
-git clone https://huggingface.co/Pinch-Research/latentsync checkpoints
-git clone https://huggingface.co/Pinch-Research/latentsync_testset testset
+if [ ! -d "checkpoints" ]; then
+    git clone https://huggingface.co/Pinch-Research/latentsync checkpoints
+fi
 
+# if [ ! -d "testset" ]; then
+#     git clone https://huggingface.co/datasets/Pinch-Research/latentsync_testset testset
+# fi
 
 # Soft links for the auxiliary models
 mkdir -p ~/.cache/torch/hub/checkpoints
