@@ -142,21 +142,24 @@ async def save_async_frames(
         int: Number of frames processed.
     """
     count = 0
+    pbar = None
 
-    with tqdm(desc="Saving video", total=total_frames, disable=disable_progress) as pbar:
-        with LazyVideoWriter(
-            video_path,
-            fps=video_fps,
-            audio_sr=audio_sr,
-            save_images=save_images,
-        ) as writer:
-            async for result in frames_iter:
-                writer.write(result.video_frame)
-                writer.write_audio_frame(result.audio_samples)
-                # if count == 0:
-                #     pbar.reset()
-                count += 1
-                pbar.update(1)
+    with LazyVideoWriter(
+        video_path,
+        fps=video_fps,
+        audio_sr=audio_sr,
+        save_images=save_images,
+    ) as writer:
+        async for result in frames_iter:
+            if pbar is None:
+                pbar = tqdm(desc="Saving video", total=total_frames, disable=disable_progress)
+            writer.write(result.video_frame)
+            writer.write_audio_frame(result.audio_samples)
+            count += 1
+            pbar.update(1)
+
+    if pbar is not None:
+        pbar.close()
 
     print(f"Processed {count} frames")
     print(f"Saved to {video_path}")

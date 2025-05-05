@@ -331,8 +331,13 @@ class LatentSync(VideoGenerator):
         )
 
     async def inference(self, video_path, audio_path, output_path):
+        # Get total frames from input video
+        cap = cv2.VideoCapture(video_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+        
         self.push_video_stream(video_path, audio_path)
-        await self.save_to_video(output_path)
+        await self.save_to_video(output_path, total_frames=total_frames)
 
 class AvatarGenerator:
     def __init__(self, latent_sync: LatentSync=None, vad: SileroVAD=None, use_vad: bool = True):
