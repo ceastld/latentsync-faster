@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import cv2
+import torch
 from tqdm import tqdm
 from latentsync import GLOBAL_CONFIG, LatentSync, Timer
 from latentsync.inference.utils import load_audio_clips
@@ -34,6 +35,7 @@ async def main():
 
 if __name__ == "__main__":
     # Timer.enable()
+    torch.backends.cuda.matmul.allow_tf32 = True
     asyncio.run(main())
     # audio_clips = load_audio_clips("assets/cxk.mp3", 625)
     # print(audio_clips[0])

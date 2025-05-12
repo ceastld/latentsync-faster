@@ -1,3 +1,4 @@
+import torch
 from latentsync import *
 import argparse
 
@@ -10,6 +11,8 @@ def main():
     parser.add_argument("--output_path", type=str, help="输出路径")
     args = parser.parse_args()
     print("开始进行推理...")
+
+    torch.backends.cuda.matmul.allow_tf32 = True
 
     if args.time:
         Timer.enable()
