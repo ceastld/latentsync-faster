@@ -58,10 +58,17 @@ class LipsyncContext:
         checkpoint_dir: str = None,
         # VAD selection
         use_vad: bool = True,
+        # Face Processor parameters
+        use_gaussian_blur: bool = True,
+        face_batch_size: int = 5,
     ):
         checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
         self.config = config = self.get_config(checkpoint_dir)
 
+        # Face Processor parameters
+        self.use_gaussian_blur = use_gaussian_blur or config.use_gaussian_blur
+        self.face_batch_size = face_batch_size or config.face_batch_size
+        
         # Basic parameters
         self.audio_sample_rate = audio_sample_rate or config.audio_sample_rate
         self.video_fps = video_fps or config.video_fps

@@ -50,4 +50,4 @@ from latentsync.inference.audio_infer import AudioProcessor
 from latentsync.inference.context import LipsyncContext, LipsyncContext_v15
 from latentsync.configs.config import GLOBAL_CONFIG
 from latentsync.utils.timer import Timer
-from latentsync.inference._datas import AudioFrame
+from latentsync.inference._datas import AudioFrame, VideoFrame, AudioVideoFrame

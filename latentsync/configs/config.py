@@ -43,7 +43,8 @@ class LipsyncConfig:
     samples_per_frame = int(16000 / 25)
     # only for parallel inference
     audio_batch_size = 16
-
+    face_batch_size = 5
+    use_gaussian_blur = True
     # Frame parameters
     num_frames = 8
     height = 256

@@ -14,9 +14,6 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from latentsync.utils.frame_preprocess import process_frame
-
-
 def print_pt(path):
     data = torch.load(path)
     recursive_print(data)

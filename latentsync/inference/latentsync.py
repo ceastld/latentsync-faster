@@ -11,7 +11,7 @@ from latentsync.inference._utils import FPSController, save_async_frames
 from latentsync.inference.lipsync_infer import LipsyncBatchInference, LipsyncRestore
 from latentsync.inference.audio_infer import AudioBatchInference
 from latentsync.inference.context import LipsyncContext
-from latentsync.inference.face_infer import FaceInference
+from latentsync.inference.face_infer import FaceBatchInference
 from latentsync.inference.multi_infer import MultiThreadInference
 from latentsync.inference.utils import load_audio_clips
 from latentsync.pipelines.metadata import AudioMetadata, LipsyncMetadata
@@ -38,7 +38,7 @@ class LatentSyncInference:
         self.lipsync_model = LipsyncBatchInference(context=context, worker_timeout=worker_timeout)
         self.lipsync_model.start_workers()
         self.lipsync_model.wait_worker_loaded()
-        self.face_model = FaceInference(context=context, worker_timeout=worker_timeout)
+        self.face_model = FaceBatchInference(context=context, worker_timeout=worker_timeout)
         self.face_model.start_workers()
         self.audio_model = AudioBatchInference(context=context, worker_timeout=worker_timeout, use_vad=context.use_vad)
         self.audio_model.start_workers()
@@ -190,6 +190,14 @@ class LatentSyncInference:
         """Signal the end of data stream for both frame and audio controllers."""
         self.frame_controller.push_data(DataSegmentEnd())
         self.audio_controller.push_data(DataSegmentEnd())
+    
+    def add_video_end_task(self):
+        """Signal the end of data stream for video controller."""
+        self.frame_controller.push_data(DataSegmentEnd())
+    
+    def add_audio_end_task(self):
+        """Signal the end of data stream for audio controller."""
+        self.audio_controller.push_data(DataSegmentEnd())
 
 
 class LatentSync(VideoGenerator):
@@ -247,6 +255,14 @@ class LatentSync(VideoGenerator):
     def add_end_task(self):
         """Add an end task to the processing pipeline."""
         self.model.add_end_task()
+        
+    def add_video_end_task(self):
+        """Signal the end of data stream for video controller."""
+        self.model.add_video_end_task()
+
+    def add_audio_end_task(self):
+        """Signal the end of data stream for audio controller."""
+        self.model.add_audio_end_task()
 
     def push_frame(self, frame: Union[np.ndarray, List[np.ndarray]]):
         """Push one or more frames to the processing pipeline.
