@@ -4,6 +4,8 @@ This project provides two methods for Docker deployment:
 
 ## Method 1: Using Docker Compose (Recommended)
 
+# see [Installing the NVIDIA Container Toolkit — NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#setting-up-nvidia-container-toolkit) to setup the docker environment.
+
 ```bash
 # Install required tools
 sudo apt-get install -y nvidia-container-toolkit

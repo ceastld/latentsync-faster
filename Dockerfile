@@ -32,16 +32,18 @@ RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel
 RUN pip3 install --no-cache-dir numba
 RUN pip3 install --no-cache-dir -r requirements.txt
 RUN pip3 install --no-cache-dir huggingface_hub
+
+# Copy the rest of the application code
+COPY . .
+
+# Install the package in editable mode
+RUN pip3 install -e .
+
+# Download VAE models (matching setup_env.sh)
 RUN python3 -c "from diffusers import AutoencoderTiny; vae = AutoencoderTiny.from_pretrained('madebyollin/taesd')"
-# Create directories for checkpoints
-RUN mkdir -p ~/.cache/torch/hub/checkpoints
+RUN python3 -c "from diffusers import AutoencoderKL; vae = AutoencoderKL.from_pretrained('stabilityai/sd-vae-ft-mse')"
+
 # Download checkpoints from HuggingFace
 # RUN git clone https://huggingface.co/Pinch-Research/latentsync checkpoints
 # Copy the rest of the application
 # COPY ./checkpoints ./checkpoints
-
-# Create symbolic links for auxiliary models
-RUN ln -sf $(pwd)/checkpoints/auxiliary/2DFAN4-cd938726ad.zip ~/.cache/torch/hub/checkpoints/2DFAN4-cd938726ad.zip
-RUN ln -sf $(pwd)/checkpoints/auxiliary/s3fd-619a316812.pth ~/.cache/torch/hub/checkpoints/s3fd-619a316812.pth
-RUN ln -sf $(pwd)/checkpoints/auxiliary/vgg16-397923af.pth ~/.cache/torch/hub/checkpoints/vgg16-397923af.pth
-RUN pip install --no-cache-dir gradio

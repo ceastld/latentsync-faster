@@ -1,0 +1,3 @@
+checkpoints/auxiliary/*
+checkpoints/v15/*
+checkpoints/whisper/*

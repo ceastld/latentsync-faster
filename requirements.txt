@@ -27,3 +27,4 @@ insightface
 pydub
 python-dotenv
 requests
+numba
