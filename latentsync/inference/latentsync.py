@@ -1,10 +1,12 @@
 import asyncio
 import os
+import time
 from typing import AsyncGenerator, AsyncIterator, List, Set, Union, TypeVar
 
 import cv2
 import numpy as np
 from tqdm import tqdm
+from latentsync.configs.config import GLOBAL_CONFIG
 from latentsync.inference._datas import AudioFrame, DataSegmentEnd, AudioVideoFrame, VideoFrame
 from latentsync.inference._types import VideoGenerator
 from latentsync.inference._utils import FPSController, save_async_frames
@@ -34,6 +36,12 @@ class LatentSyncInference:
         # Add FPS controllers with immediate output parameter
         self.frame_controller = FPSController[Union[VideoFrame, DataSegmentEnd]](fps=max_input_fps, immediate_output_count=immediate_frames)
         self.audio_controller = FPSController[Union[AudioFrame, DataSegmentEnd]](fps=max_input_fps, immediate_output_count=immediate_frames)
+        
+        # Add output FPS controller for result stream
+        self.output_controller = FPSController[Union[AudioVideoFrame, DataSegmentEnd]](
+            fps=context.video_fps, 
+            immediate_output_count=0
+        )
 
         self.lipsync_model = LipsyncBatchInference(context=context, worker_timeout=worker_timeout)
         self.lipsync_model.start_workers()
@@ -50,6 +58,7 @@ class LatentSyncInference:
         # Start controller streams
         self.create_task(self._stream_frames())
         self.create_task(self._stream_audio())
+        self.create_task(self._stream_output())
 
     @property
     def workers(self):
@@ -65,7 +74,7 @@ class LatentSyncInference:
         """Push one or more frames to the frame controller.
 
         Args:
-            frame: Single frame (np.ndarray with shape: (H, W, 3), dtype: uint8) or 
+            frame: Single frame (np.ndarray with shape: (H, W, 3), dtype: uint8) or
                    list of frames
         """
         if isinstance(frame, list):
@@ -112,6 +121,8 @@ class LatentSyncInference:
             self.frame_controller.stop()
         if hasattr(self, "audio_controller"):
             self.audio_controller.stop()
+        if hasattr(self, "output_controller"):
+            self.output_controller.stop()
         for task in self.tasks:
             task.cancel()
         for worker in self.workers:
@@ -174,30 +185,44 @@ class LatentSyncInference:
         self.lipsync_restore.add_end_task()
         pbar.close()
 
-    async def result_stream(self) -> AsyncGenerator[AudioVideoFrame, None]:
-        """Stream results from the lipsync restoration process.
-
-        Yields:
-            LipsyncResult: A result containing processed video frame and audio sample.
-        """
+    async def _stream_output(self):
+        """Stream results from the lipsync restoration process to the output controller."""
         async for result in self.lipsync_restore.result_stream():
-            yield AudioVideoFrame(
+            output_frame = AudioVideoFrame(
                 audio_samples=result.audio_samples,
                 video_frame=result.lipsync_frame,
             )
+            self.output_controller.push_data(output_frame)
+        # Signal end of output stream
+        self.output_controller.push_data(DataSegmentEnd())
+
+    async def result_stream(self) -> AsyncGenerator[AudioVideoFrame, None]:
+        """Stream results from the output controller at controlled FPS.
+
+        Yields:
+            AudioVideoFrame: A result containing processed video frame and audio sample.
+        """
+        async for data in self.output_controller.stream():
+            if isinstance(data, DataSegmentEnd):
+                break
+            yield data
 
     def add_end_task(self):
         """Signal the end of data stream for both frame and audio controllers."""
         self.frame_controller.push_data(DataSegmentEnd())
         self.audio_controller.push_data(DataSegmentEnd())
-    
+
     def add_video_end_task(self):
         """Signal the end of data stream for video controller."""
         self.frame_controller.push_data(DataSegmentEnd())
-    
+
     def add_audio_end_task(self):
         """Signal the end of data stream for audio controller."""
         self.audio_controller.push_data(DataSegmentEnd())
+
+    def add_output_end_task(self):
+        """Signal the end of data stream for output controller."""
+        self.output_controller.push_data(DataSegmentEnd())
 
 
 class LatentSync(VideoGenerator):
@@ -255,7 +280,7 @@ class LatentSync(VideoGenerator):
     def add_end_task(self):
         """Add an end task to the processing pipeline."""
         self.model.add_end_task()
-        
+
     def add_video_end_task(self):
         """Signal the end of data stream for video controller."""
         self.model.add_video_end_task()
@@ -264,11 +289,15 @@ class LatentSync(VideoGenerator):
         """Signal the end of data stream for audio controller."""
         self.model.add_audio_end_task()
 
+    def add_output_end_task(self):
+        """Signal the end of data stream for output controller."""
+        self.model.add_output_end_task()
+
     def push_frame(self, frame: Union[np.ndarray, List[np.ndarray]]):
         """Push one or more frames to the processing pipeline.
 
         Args:
-            frame: Single frame (np.ndarray with shape: (H, W, 3), dtype: uint8) or 
+            frame: Single frame (np.ndarray with shape: (H, W, 3), dtype: uint8) or
                    list of frames in RGB format.
 
         Raises:
@@ -328,11 +357,11 @@ class LatentSync(VideoGenerator):
         frame = cv2.imread(image_path)
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         self.push_frame([frame] * len(audio_clips))
-        
+
         # Convert and push audio frames
         audio_frames = [AudioFrame.from_numpy(clip) for clip in audio_clips]
         self.model.push_audio(audio_frames)
-            
+
         self.model.add_end_task()
 
     async def save_to_video(self, video_path, save_images=False, total_frames=None):
@@ -351,12 +380,23 @@ class LatentSync(VideoGenerator):
         cap = cv2.VideoCapture(video_path)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         cap.release()
-        
+
         self.push_video_stream(video_path, audio_path)
         await self.save_to_video(output_path, total_frames=total_frames)
 
+    async def model_warmup(self):
+        demo = GLOBAL_CONFIG.inference.obama1
+        start_time = time.time()
+        self.push_video_stream(demo.video_path, demo.audio_path, max_frames=1)
+        async for frame in self.result_stream():
+            pass
+        end_time = time.time()
+        print(f"Model warmup time: {end_time - start_time} seconds")
+        self.setup_model()
+
+
 class AvatarGenerator:
-    def __init__(self, latent_sync: LatentSync=None, vad: SileroVAD=None, use_vad: bool = True):
+    def __init__(self, latent_sync: LatentSync = None, vad: SileroVAD = None, use_vad: bool = True):
         self.latent_sync = latent_sync or LatentSync(use_vad=use_vad)
         self.vad = vad or SileroVAD()
         self._av_queue = asyncio.Queue[AudioVideoFrame]()
@@ -366,22 +406,22 @@ class AvatarGenerator:
     async def start(self):
         async def aaa():
             pass
+
         pass
-    
+
     async def push_audio(self, audio: AudioFrame):
         audio.is_speech = self.vad.detect(audio.audio_samples)
         await self._audio_queue.put(audio)
-    
+
     async def push_frame(self, frame: VideoFrame):
         await self._video_queue.put(frame)
-    
-    async def __aiter__(self)-> AsyncIterator[AudioVideoFrame | DataSegmentEnd]:
+
+    async def __aiter__(self) -> AsyncIterator[AudioVideoFrame | DataSegmentEnd]:
         return self.stream_impl()
-    
+
     async def stream_impl(self):
-        
+
         pass
-    
+
     async def close(self):
         pass
-    

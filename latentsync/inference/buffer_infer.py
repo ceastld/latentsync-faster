@@ -11,22 +11,25 @@ class BufferInference(MultiThreadInference, Generic[T, R]):
     data before processing in batches.
     """
     
-    def __init__(self, batch_size: int, num_workers=1, worker_timeout=60):
+    def __init__(self, num_workers=1, worker_timeout=60):
         super().__init__(num_workers, worker_timeout)
-        self.batch_size = batch_size
         self.data_buffer: List[T] = []
+        
+    def get_batch_size(self) -> int:
+        """Get current batch size. Should be implemented by subclasses."""
+        raise NotImplementedError("Subclasses must implement get_batch_size")
         
     def push_data(self, data: T):
         """Push single data item to buffer."""
         self.data_buffer.append(data)
-        if len(self.data_buffer) >= self.batch_size:
+        if len(self.data_buffer) >= self.get_batch_size():
             self.add_one_task(self.data_buffer)
             self.data_buffer = []
             
     def push_data_batch(self, data: List[T]):
         """Push multiple data items to buffer."""
         self.data_buffer.extend(data)
-        if len(self.data_buffer) >= self.batch_size:
+        if len(self.data_buffer) >= self.get_batch_size():
             self.add_one_task(self.data_buffer)
             self.data_buffer = []
             

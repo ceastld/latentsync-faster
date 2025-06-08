@@ -40,8 +40,18 @@ class LipsyncInference(MultiThreadInference[LipsyncMetadata, LipsyncMetadata]):
 
 class LipsyncBatchInference(BufferInference[LipsyncMetadata, LipsyncMetadata]):
     def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60):
-        super().__init__(context.num_frames, num_workers, worker_timeout)
+        super().__init__(num_workers, worker_timeout)
         self.context = context
+        self.batch_count = 0  # Track how many batches have been processed
+    
+    def get_batch_size(self) -> int:
+        """Get dynamic batch size: 4, 8, 16, 16, 16, ..."""
+        if self.batch_count == 0:
+            return 16
+        elif self.batch_count == 1:
+            return 12
+        else:
+            return 12
     
     def get_model(self):
         return LipsyncModel(self.context)
@@ -54,6 +64,10 @@ class LipsyncBatchInference(BufferInference[LipsyncMetadata, LipsyncMetadata]):
 
     def infer_task(self, model: LipsyncModel, data: List[LipsyncMetadata]):
         assert len(data) <= self.context.num_frames, f"data length should <= num_frames: {self.context.num_frames}"
+        
+        # Increment batch count when processing a batch
+        self.batch_count += 1
+        
         # if any face in data is None, return data with None face
         if any(metadata.face is None for metadata in data):
             self.logger.info("No face, return data with None face")

@@ -96,6 +96,7 @@ class LipsyncConfig:
 
 class LipsyncConfig_v15(LipsyncConfig):
     num_frames = 16
+    audio_batch_size = 16
     vae_type = "kl"
 
     @cached_property

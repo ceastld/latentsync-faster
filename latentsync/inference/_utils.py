@@ -14,6 +14,7 @@ class FPSController(Generic[T]):
     """Controls the output speed of a data stream based on a target FPS.
 
     This class buffers incoming data and outputs it at a controlled rate defined by the FPS.
+    Ensures output FPS is between target_fps and target_fps+1 (e.g., 25~26fps).
 
     Args:
         fps (float): Target frames per second
@@ -25,6 +26,7 @@ class FPSController(Generic[T]):
     def __init__(self, fps: float, max_buffer_size: int = None, immediate_output_count: int = 0):
         self.fps = fps
         self.frame_interval = 1.0 / fps
+        self.min_frame_interval = 1.0 / (fps + 1)  # Maximum allowed FPS is target_fps + 1
         self.buffer: Deque[T] = deque() if max_buffer_size is None else deque(maxlen=max_buffer_size)
         self.last_frame_time = 0
         self._stop_event = asyncio.Event()
@@ -56,36 +58,75 @@ class FPSController(Generic[T]):
         """Stream data at the controlled FPS rate.
 
         Initial items up to immediate_output_count will be yielded immediately without FPS control.
-        After that, items are yielded according to the specified FPS rate.
+        After that, items are yielded at a rate between target_fps and target_fps+1.
 
         Yields:
             T: Data from the buffer at the controlled rate
         """
-        self.last_frame_time = asyncio.get_event_loop().time()
+        start_time = asyncio.get_event_loop().time()
+        last_output_time = start_time
 
         while not self._stop_event.is_set():
             if not self.buffer:
                 # If buffer is empty, wait a bit and check again
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.001)
                 continue
 
             # Check if we should output immediately (for initial items)
             if self.output_count < self.immediate_output_count:
                 yield self.buffer.popleft()
                 self.output_count += 1
+                last_output_time = asyncio.get_event_loop().time()
                 continue
 
             current_time = asyncio.get_event_loop().time()
-            elapsed = current_time - self.last_frame_time
-
-            # If enough time has passed according to FPS, yield the next item
-            if elapsed >= self.frame_interval:
-                yield self.buffer.popleft()
-                self.last_frame_time = current_time
-                self.output_count += 1
+            elapsed = current_time - start_time
+            time_since_last = current_time - last_output_time
+            
+            # Calculate expected frame count based on elapsed time and target FPS
+            expected_frame_count = elapsed * self.fps
+            actual_frame_count = self.output_count - self.immediate_output_count
+            
+            # Check if enough time has passed since last output (prevent output > target_fps+1)
+            min_interval_ok = time_since_last >= self.min_frame_interval
+            
+            # Check if we need to output to maintain >= target_fps
+            need_to_catch_up = actual_frame_count < expected_frame_count
+            
+            # Output conditions:
+            # 1. If we need to catch up AND minimum interval has passed
+            # 2. If we're on schedule and proper time interval has passed
+            should_output = False
+            wait_time = 0
+            
+            if need_to_catch_up and min_interval_ok:
+                # We're behind but respecting max FPS limit
+                should_output = True
+            elif not need_to_catch_up:
+                # We're on schedule or ahead, calculate precise wait time
+                next_frame_time = start_time + (actual_frame_count + 1) / self.fps
+                wait_time = next_frame_time - current_time
+                
+                if wait_time <= 0.001 and min_interval_ok:
+                    # Time to output next frame
+                    should_output = True
+                elif wait_time > 0.001:
+                    # Wait for the right time, but also respect min interval
+                    min_wait_time = self.min_frame_interval - time_since_last
+                    actual_wait_time = max(wait_time, min_wait_time) if min_wait_time > 0 else wait_time
+                    await asyncio.sleep(min(actual_wait_time, self.frame_interval * 0.8))
+                    continue
             else:
-                # Wait until it's time for the next frame
-                await asyncio.sleep(max(0, self.frame_interval - elapsed))
+                # Need to catch up but haven't met minimum interval - wait a bit
+                remaining_min_interval = self.min_frame_interval - time_since_last
+                if remaining_min_interval > 0:
+                    await asyncio.sleep(min(remaining_min_interval, 0.01))
+                continue
+            
+            if should_output and self.buffer:
+                yield self.buffer.popleft()
+                self.output_count += 1
+                last_output_time = asyncio.get_event_loop().time()
 
         # Drain remaining items in buffer when stopped
         while self.buffer:

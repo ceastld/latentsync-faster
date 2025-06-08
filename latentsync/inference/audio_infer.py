@@ -87,10 +87,20 @@ class AudioInference(MultiThreadInference[np.ndarray, np.ndarray]):
 
 class AudioBatchInference(BufferInference[np.ndarray, AudioMetadata]):
     def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60, use_vad=True):
-        super().__init__(context.audio_batch_size, num_workers, worker_timeout)
+        super().__init__(num_workers, worker_timeout)
         self.context = context
         self.last_audio_samples = None
         self.use_vad = use_vad
+        self.batch_count = 0  # Track how many batches have been processed
+
+    def get_batch_size(self) -> int:
+        """Get dynamic batch size: 4, 8, 16, 16, 16, ..."""
+        if self.batch_count == 0:
+            return 16
+        elif self.batch_count == 1:
+            return 12
+        else:
+            return 12
 
     def get_model(self):
         if self.use_vad:
@@ -102,6 +112,9 @@ class AudioBatchInference(BufferInference[np.ndarray, AudioMetadata]):
         self.push_data_batch(audio_clips)
 
     def infer_task(self, model: AudioProcessor, data: List[np.ndarray]):
+        # Increment batch count when processing a batch
+        self.batch_count += 1
+        
         audio_samples = np.concatenate(data)
         is_speech = True
         if self.use_vad:

@@ -34,9 +34,19 @@ class FaceInference(MultiThreadInference[np.ndarray, LipsyncMetadata]):
     
 class FaceBatchInference(BufferInference[np.ndarray, LipsyncMetadata]):
     def __init__(self, context: LipsyncContext, num_workers=1, worker_timeout=60):
-        super().__init__(context.face_batch_size, num_workers, worker_timeout)
+        super().__init__(num_workers, worker_timeout)
         self.context = context
+        self.batch_count = 0  # Track how many batches have been processed
         
+    def get_batch_size(self) -> int:
+        """Get dynamic batch size: 1, 3, 5, 5, 5, ..."""
+        if self.batch_count == 0:
+            return 1
+        elif self.batch_count == 1:
+            return 3
+        else:
+            return 5
+    
     def get_model(self):
         return self.context.face_processor
     
@@ -50,6 +60,9 @@ class FaceBatchInference(BufferInference[np.ndarray, LipsyncMetadata]):
     
     def infer_task(self, model: FaceProcessor, data: List[np.ndarray]):
         """Process a batch of frames using face processor with interpolation"""
+        # Increment batch count when processing a batch
+        self.batch_count += 1
+        
         # Use interpolation method to process faces efficiently
         if self.context.use_gaussian_blur:
             data = [cv2.GaussianBlur(frame, (3, 3), 0) for frame in data]

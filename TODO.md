@@ -20,3 +20,10 @@
 
 
 * 超过1s没有音频输入，自动进行推理？
+
+第一个 batch_size = 8
+第二个 batch_size = 16
+后面的 batch_size = 20
+or 动态 batch_size
+不是非要等到 batch_size = 20 才开始跑
+min_batch_size = 8
