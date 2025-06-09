@@ -37,7 +37,7 @@ class LatentSyncInference:
         # Add FPS controllers with immediate output parameter
         self.frame_controller = FPSController[Union[VideoFrame, DataSegmentEnd]](fps=max_input_fps, immediate_output_count=immediate_frames)
         self.audio_controller = FPSController[Union[AudioFrame, DataSegmentEnd]](fps=max_input_fps, immediate_output_count=immediate_frames)
-        
+
         # Add output FPS controller for result stream
         self.output_controller = FPSController[Union[AudioVideoFrame, DataSegmentEnd]](fps=context.video_fps)
 
@@ -387,13 +387,16 @@ class LatentSync(VideoGenerator):
             total_frames=total_frames,
         )
 
-    async def inference(self, video_path, audio_path, output_path):
+    async def inference(self, video_path, audio_path, output_path, max_frames: int | None = None):
         # Get total frames from input video
-        cap = cv2.VideoCapture(video_path)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap.release()
+        if max_frames is None:
+            cap = cv2.VideoCapture(video_path)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            cap.release()
+        else:
+            total_frames = max_frames
 
-        self.push_video_stream(video_path, audio_path)
+        self.push_video_stream(video_path, audio_path, max_frames=max_frames)
         await self.save_to_video(output_path, total_frames=total_frames)
 
     async def model_warmup(self):
