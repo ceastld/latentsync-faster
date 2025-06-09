@@ -94,13 +94,7 @@ class AudioBatchInference(BufferInference[np.ndarray, AudioMetadata]):
         self.batch_count = 0  # Track how many batches have been processed
 
     def get_batch_size(self) -> int:
-        """Get dynamic batch size: 4, 8, 16, 16, 16, ..."""
-        if self.batch_count == 0:
-            return 16
-        elif self.batch_count == 1:
-            return 12
-        else:
-            return 12
+        return self.context.audio_batch_size
 
     def get_model(self):
         if self.use_vad:

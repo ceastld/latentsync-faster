@@ -3,27 +3,32 @@
 * face_preprocess speed up, use onnxruntime-gpu
 * faster restore_img, 
 * restore_img faster by wrapAffine in GPU
-* 排查每一步数据是否在GPU上
+* check if each step data is on GPU
 * docker https://hub.docker.com/r/pytorch/pytorch/tags
 
-* 大分辨率图像的 restore_img 优化，ROI 策略，提前计算出仿射变换影响区域，只将需要的部分放入GPU进行计算
+* optimize restore_img for high-resolution images, ROI strategy, pre-calculate affine transformation affected areas, only put necessary parts into GPU for computation
 
 * latentsync 1.5, new model
 
 * v1 L4 25fps bs8, v1.5 A100 25fps bs16
 
-* TODO: 优化没有识别到人脸情况下的输出，直接输出原始图片
-* pose 变化就不处理，
+* optimize output when no face detected, directly output original image
+* skip processing when pose changes
 
-* 可能存在的问题，多个人同时换嘴推理的情况
+* potential issue: multiple people face-swapping inference simultaneously
 
 
 
-* 超过1s没有音频输入，自动进行推理？
+* auto inference when no audio input for over 1s?
 
-第一个 batch_size = 8
-第二个 batch_size = 16
-后面的 batch_size = 20
-or 动态 batch_size
-不是非要等到 batch_size = 20 才开始跑
-min_batch_size = 8
+
+Initial Delay ~= 1.5s
+
+---
+* use warmup strategy, after model loading, push one frame data to complete LatentSync module warmup, takes about 0.55s
+* added FPS controller to control output stream at ~25fps
+* change batch_size to 12 to reduce latency and improve stability
+
+## Performance Test Results (240 frames)
+* **First frame delay**: 1.383s 
+* **Overall FPS**: 25.04 fps ✅ (target achieved)

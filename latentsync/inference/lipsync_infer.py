@@ -45,13 +45,7 @@ class LipsyncBatchInference(BufferInference[LipsyncMetadata, LipsyncMetadata]):
         self.batch_count = 0  # Track how many batches have been processed
     
     def get_batch_size(self) -> int:
-        """Get dynamic batch size: 4, 8, 16, 16, 16, ..."""
-        if self.batch_count == 0:
-            return 16
-        elif self.batch_count == 1:
-            return 12
-        else:
-            return 12
+        return self.context.num_frames
     
     def get_model(self):
         return LipsyncModel(self.context)
@@ -90,7 +84,6 @@ class LipsyncRestore(MultiThreadInference[LipsyncMetadata, LipsyncMetadata]):
         return AlignRestore()
     
     def push_data(self, data: Union[LipsyncMetadata, List[LipsyncMetadata]]):
-        self.add_tasks
         if isinstance(data, list):
             for d in data:
                 self.add_one_task(d)

@@ -59,12 +59,14 @@ class FPSController(Generic[T]):
 
         Initial items up to immediate_output_count will be yielded immediately without FPS control.
         After that, items are yielded at a rate between target_fps and target_fps+1.
+        Optimized to ensure early frames maintain >= target_fps.
 
         Yields:
             T: Data from the buffer at the controlled rate
         """
-        start_time = asyncio.get_event_loop().time()
-        last_output_time = start_time
+        start_time = None  # Will be set when first controlled frame is output
+        last_output_time = asyncio.get_event_loop().time()
+        grace_period_frames = 3  # First 3 frames get preferential treatment
 
         while not self._stop_event.is_set():
             if not self.buffer:
@@ -80,10 +82,16 @@ class FPSController(Generic[T]):
                 continue
 
             current_time = asyncio.get_event_loop().time()
+            
+            # Initialize start_time when we begin FPS-controlled output
+            if start_time is None:
+                start_time = current_time
+            
             elapsed = current_time - start_time
             time_since_last = current_time - last_output_time
             
             # Calculate expected frame count based on elapsed time and target FPS
+            # Start counting from when FPS control begins
             expected_frame_count = elapsed * self.fps
             actual_frame_count = self.output_count - self.immediate_output_count
             
@@ -93,14 +101,18 @@ class FPSController(Generic[T]):
             # Check if we need to output to maintain >= target_fps
             need_to_catch_up = actual_frame_count < expected_frame_count
             
+            # Special handling for early frames to ensure good startup performance
+            is_early_frame = self.output_count < (self.immediate_output_count + grace_period_frames)
+            
             # Output conditions:
-            # 1. If we need to catch up AND minimum interval has passed
-            # 2. If we're on schedule and proper time interval has passed
             should_output = False
             wait_time = 0
             
-            if need_to_catch_up and min_interval_ok:
-                # We're behind but respecting max FPS limit
+            if is_early_frame and min_interval_ok:
+                # For early frames, output as soon as min interval is met
+                should_output = True
+            elif need_to_catch_up and min_interval_ok:
+                # We're behind schedule and min interval has passed
                 should_output = True
             elif not need_to_catch_up:
                 # We're on schedule or ahead, calculate precise wait time
@@ -114,13 +126,20 @@ class FPSController(Generic[T]):
                     # Wait for the right time, but also respect min interval
                     min_wait_time = self.min_frame_interval - time_since_last
                     actual_wait_time = max(wait_time, min_wait_time) if min_wait_time > 0 else wait_time
+                    # Reduce wait time for early frames
+                    if is_early_frame:
+                        actual_wait_time = min(actual_wait_time, self.min_frame_interval)
                     await asyncio.sleep(min(actual_wait_time, self.frame_interval * 0.8))
                     continue
             else:
                 # Need to catch up but haven't met minimum interval - wait a bit
                 remaining_min_interval = self.min_frame_interval - time_since_last
                 if remaining_min_interval > 0:
-                    await asyncio.sleep(min(remaining_min_interval, 0.01))
+                    # Shorter wait for early frames
+                    wait_duration = min(remaining_min_interval, 0.01)
+                    if is_early_frame:
+                        wait_duration = min(wait_duration, 0.005)  # Even shorter for early frames
+                    await asyncio.sleep(wait_duration)
                 continue
             
             if should_output and self.buffer:
@@ -172,7 +191,7 @@ async def save_async_frames(
     disable_progress: bool = False,
     total_frames: int = None,
 ):
-    """Save the processed results to a video file.
+    """Save the processed results to a video file with optimized async writing.
 
     Args:
         video_path (str): Path to save the output video.
@@ -184,6 +203,26 @@ async def save_async_frames(
     """
     count = 0
     pbar = None
+    write_queue = asyncio.Queue(maxsize=50)  # Buffer up to 50 frames
+    writer_task = None
+    
+    async def background_writer():
+        """Background task to write frames to video file."""
+        nonlocal writer
+        while True:
+            try:
+                item = await write_queue.get()
+                if item is None:  # Sentinel to stop
+                    break
+                frame, audio = item
+                writer.write(frame)
+                writer.write_audio_frame(audio)
+                write_queue.task_done()
+                # Small yield to prevent blocking
+                await asyncio.sleep(0)
+            except Exception as e:
+                print(f"Error in background writer: {e}")
+                break
 
     with LazyVideoWriter(
         video_path,
@@ -191,13 +230,28 @@ async def save_async_frames(
         audio_sr=audio_sr,
         save_images=save_images,
     ) as writer:
-        async for result in frames_iter:
-            if pbar is None:
-                pbar = tqdm(desc="Saving video", total=total_frames, disable=disable_progress)
-            writer.write(result.video_frame)
-            writer.write_audio_frame(result.audio_samples)
-            count += 1
-            pbar.update(1)
+        # Start background writer task
+        writer_task = asyncio.create_task(background_writer())
+        
+        try:
+            async for result in frames_iter:
+                if pbar is None:
+                    pbar = tqdm(desc="Saving video", total=total_frames, disable=disable_progress)
+                
+                # Add to write queue (this will block if queue is full, providing backpressure)
+                await write_queue.put((result.video_frame, result.audio_samples))
+                count += 1
+                pbar.update(1)
+                
+                # Yield occasionally to keep the stream flowing
+                if count % 5 == 0:
+                    await asyncio.sleep(0)
+        
+        finally:
+            # Signal background writer to stop
+            await write_queue.put(None)
+            if writer_task:
+                await writer_task
 
     if pbar is not None:
         pbar.close()

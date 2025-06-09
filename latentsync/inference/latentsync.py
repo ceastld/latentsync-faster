@@ -30,18 +30,16 @@ class LatentSyncInference:
 
         self.loop = asyncio.get_event_loop()
         self.tasks: Set[asyncio.Task] = set()
-        self.metadata_queue: asyncio.Queue[LipsyncMetadata] = asyncio.Queue()
-        self.audio_data_queue: asyncio.Queue[AudioMetadata] = asyncio.Queue()
+        # Use bounded queues for backpressure control
+        self.metadata_queue: asyncio.Queue[LipsyncMetadata] = asyncio.Queue(maxsize=1000)
+        self.audio_data_queue: asyncio.Queue[AudioMetadata] = asyncio.Queue(maxsize=1000)
 
         # Add FPS controllers with immediate output parameter
         self.frame_controller = FPSController[Union[VideoFrame, DataSegmentEnd]](fps=max_input_fps, immediate_output_count=immediate_frames)
         self.audio_controller = FPSController[Union[AudioFrame, DataSegmentEnd]](fps=max_input_fps, immediate_output_count=immediate_frames)
         
         # Add output FPS controller for result stream
-        self.output_controller = FPSController[Union[AudioVideoFrame, DataSegmentEnd]](
-            fps=context.video_fps, 
-            immediate_output_count=0
-        )
+        self.output_controller = FPSController[Union[AudioVideoFrame, DataSegmentEnd]](fps=context.video_fps)
 
         self.lipsync_model = LipsyncBatchInference(context=context, worker_timeout=worker_timeout)
         self.lipsync_model.start_workers()
@@ -59,6 +57,7 @@ class LatentSyncInference:
         self.create_task(self._stream_frames())
         self.create_task(self._stream_audio())
         self.create_task(self._stream_output())
+        self.create_task(self._monitor_queues())  # Add queue monitoring
 
     @property
     def workers(self):
@@ -223,6 +222,19 @@ class LatentSyncInference:
     def add_output_end_task(self):
         """Signal the end of data stream for output controller."""
         self.output_controller.push_data(DataSegmentEnd())
+
+    async def _monitor_queues(self):
+        """Monitor queue sizes and log performance metrics."""
+        while not self.stopped:
+            try:
+                await asyncio.sleep(2.0)  # Check every 2 seconds
+                if self.enable_progress:
+                    metadata_size = self.metadata_queue.qsize()
+                    audio_size = self.audio_data_queue.qsize()
+                    if metadata_size > 50 or audio_size > 50:
+                        print(f"Queue sizes - Face: {metadata_size}, Audio: {audio_size}")
+            except Exception:
+                break
 
 
 class LatentSync(VideoGenerator):
