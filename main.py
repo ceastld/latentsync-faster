@@ -19,9 +19,10 @@ logger = logging.getLogger(__name__)
 async def speed_test(model: LatentSync, max_frames: int = 240) -> None:
     """Test model speed and record frame timing information"""
     example = GLOBAL_CONFIG.inference.obama
-    model.push_video_stream(example.video_path, example.audio_path, max_frames=max_frames)
+    model.push_video_stream(example.video_path, example.audio_path, max_frames=max_frames, max_input_fps=26)
     
     # Use the timing function with the result stream
+    # await model.save_to_video(example.video_out_path, total_frames=max_frames)
     await speed_test_with_timing(model.result_stream())
 
 
