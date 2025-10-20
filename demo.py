@@ -2,12 +2,35 @@ import os
 import gradio as gr
 import numpy as np
 import soundfile as sf
+import subprocess
+import tempfile
 from latentsync.inference.context import LipsyncContext
 from latentsync.inference.utils import create_pipeline
 
 # Initialize the lip sync context and pipeline
 context = LipsyncContext()
 pipeline = create_pipeline(context)
+
+def convert_video_to_25fps(input_video_path: str, output_video_path: str) -> str:
+    """
+    Convert input video to 25fps using ffmpeg
+    """
+    try:
+        cmd = [
+            'ffmpeg', '-i', input_video_path,
+            '-r', '25',  # Set frame rate to 25fps
+            '-c:v', 'libx264',  # Use H.264 codec
+            '-preset', 'fast',  # Fast encoding
+            '-y',  # Overwrite output file
+            output_video_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return output_video_path
+    except subprocess.CalledProcessError as e:
+        raise gr.Error(f"视频转换失败: {e.stderr}")
+    except Exception as e:
+        raise gr.Error(f"视频转换出错: {str(e)}")
 
 def process_video(video_path, audio_input, seed=1247):
     """
@@ -16,6 +39,16 @@ def process_video(video_path, audio_input, seed=1247):
     # Create output directory if it doesn't exist
     os.makedirs("output", exist_ok=True)
     os.makedirs("temp", exist_ok=True)
+    
+    # Convert video to 25fps first
+    video_name = os.path.splitext(os.path.basename(video_path))[0]
+    temp_video_path = os.path.join("temp", f"{video_name}_25fps.mp4")
+    
+    try:
+        # Convert input video to 25fps
+        convert_video_to_25fps(video_path, temp_video_path)
+    except Exception as e:
+        raise gr.Error(f"视频帧率转换失败: {str(e)}")
     
     # Handle audio input (Gradio returns a tuple of (sample_rate, numpy_array) for audio)
     if isinstance(audio_input, tuple):
@@ -28,14 +61,13 @@ def process_video(video_path, audio_input, seed=1247):
         audio_path = audio_input
     
     # Generate output path
-    video_name = os.path.splitext(os.path.basename(video_path))[0]
     audio_name = "input_audio"  # Use a fixed name since we're handling numpy array
     output_path = f"output/{video_name}_{audio_name}_synced.mp4"
     
     try:
-        # Run the pipeline
+        # Run the pipeline with the 25fps video
         pipeline(
-            video_path=video_path,
+            video_path=temp_video_path,  # Use the converted 25fps video
             audio_path=audio_path,
             video_out_path=output_path,
         )
@@ -43,10 +75,16 @@ def process_video(video_path, audio_input, seed=1247):
     except Exception as e:
         raise gr.Error(f"处理失败: {str(e)}")
     finally:
-        # Clean up temporary audio file
+        # Clean up temporary files
         if isinstance(audio_input, tuple) and os.path.exists(temp_audio_path):
             try:
                 os.remove(temp_audio_path)
+            except:
+                pass
+        # Clean up temporary video file
+        if os.path.exists(temp_video_path):
+            try:
+                os.remove(temp_video_path)
             except:
                 pass
 
@@ -60,7 +98,7 @@ demo = gr.Interface(
     ],
     outputs=gr.Video(label="Lip-synced Video"),
     title="Lip Sync Demo",
-    description="Upload a video and audio file to create a lip-synced video.",
+    description="Upload a video and audio file to create a lip-synced video. Video will be automatically converted to 25fps for optimal processing.",
     examples=[
         # You can add example inputs here if you have any
     ],
