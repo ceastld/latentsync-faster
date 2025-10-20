@@ -7,20 +7,9 @@ import tempfile
 from latentsync.inference.context import LipsyncContext
 from latentsync.inference.utils import create_pipeline
 
-# Global variables for lazy initialization
-context = None
-pipeline = None
-
-def initialize_pipeline():
-    """Initialize the pipeline lazily to avoid network issues during import"""
-    global context, pipeline
-    if context is None or pipeline is None:
-        try:
-            context = LipsyncContext()
-            pipeline = create_pipeline(context)
-        except Exception as e:
-            raise gr.Error(f"初始化失败，请检查网络连接或模型文件: {str(e)}")
-    return context, pipeline
+# Initialize the lip sync context and pipeline
+context = LipsyncContext()
+pipeline = create_pipeline(context)
 
 def convert_video_to_25fps(input_video_path: str, output_video_path: str) -> str:
     """
@@ -47,12 +36,6 @@ def process_video(video_path, audio_input, seed=1247):
     """
     Process the video and audio files to create lip-synced video
     """
-    # Initialize pipeline lazily
-    try:
-        context, pipeline = initialize_pipeline()
-    except Exception as e:
-        return None, f"初始化失败: {str(e)}"
-    
     # Create output directory if it doesn't exist
     os.makedirs("output", exist_ok=True)
     os.makedirs("temp", exist_ok=True)
@@ -117,21 +100,13 @@ demo = gr.Interface(
     title="Lip Sync Demo",
     description="Upload a video and audio file to create a lip-synced video. Video will be automatically converted to 25fps for optimal processing.",
     examples=[
-        # You can add example inputs here if you have any
+        ["assets/obama.mp4", "assets/cxk.mp3", 1247],
+        ["assets/demo1_video.mp4", "assets/demo1_audio.wav", 1247],
+        ["assets/demo2_video.mp4", "assets/demo2_audio.wav", 1247],
+        ["assets/demo3_video.mp4", "assets/demo3_audio.wav", 1247],
     ],
     cache_examples=False
 )
 
 if __name__ == "__main__":
-    # Set environment variables to avoid network issues
-    os.environ["HF_HUB_OFFLINE"] = "1"  # Use offline mode for HuggingFace
-    os.environ["TRANSFORMERS_OFFLINE"] = "1"  # Use offline mode for transformers
-    
-    # Launch with specific server settings to avoid network issues
-    demo.launch(
-        share=False,  # Disable share to avoid network issues
-        server_name="127.0.0.1",  # Use localhost
-        server_port=7860,
-        show_error=True,
-        quiet=False
-    ) 
+    demo.launch() 
