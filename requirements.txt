@@ -28,3 +28,4 @@ pydub
 python-dotenv
 requests
 numba
+GPUtil
