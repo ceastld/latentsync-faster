@@ -51,7 +51,7 @@ def combine_video_and_audio(video_file, audio_file, output, quality=17, copy_aud
     audio_codec = "-c:a copy" if copy_audio else ""
     cmd = (
         f"ffmpeg -i {video_file} -i {audio_file} -c:v libx264 -crf {quality} -pix_fmt yuv420p "
-        f"{audio_codec} -fflags +shortest -y -hide_banner -loglevel error {output}"
+        f"{audio_codec} -shortest -y -hide_banner -loglevel error {output}"
     )
     assert subprocess.run(shlex.split(cmd)).returncode == 0
 

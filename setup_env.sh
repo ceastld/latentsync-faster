@@ -22,11 +22,11 @@ pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https
 pip install -e .
 
 # OpenCV dependencies
-sudo apt -y install libgl1
+# sudo apt -y install libgl1
 
 # Download all the checkpoints and testdata from HuggingFace
 if [ ! -d "checkpoints" ]; then
-    git clone https://huggingface.co/Pinch-Research/latentsync checkpoints
+    git clone https://huggingface.co/cea0/latentsync checkpoints
 fi
 
 # if [ ! -d "testset" ]; then

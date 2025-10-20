@@ -3,6 +3,7 @@ import logging
 import cv2
 import torch
 import time
+import os
 from typing import List, Tuple
 from tqdm import tqdm
 from latentsync import GLOBAL_CONFIG, LatentSync, Timer
@@ -11,6 +12,11 @@ from latentsync.utils.video import LazyVideoWriter, get_total_frames, save_frame
 
 # Import performance testing functions
 from performance_test import speed_test_with_timing
+
+# Fix ONNX Runtime thread affinity issues in Slurm environment
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["ONNX_NUM_THREADS"] = "1"
+os.environ["OMP_WAIT_POLICY"] = "PASSIVE"
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s.%(msecs)03d][%(levelname)s][%(name)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 logger = logging.getLogger(__name__)
@@ -22,8 +28,8 @@ async def speed_test(model: LatentSync, max_frames: int = 240) -> None:
     model.push_video_stream(example.video_path, example.audio_path, max_frames=max_frames, max_input_fps=26)
     
     # Use the timing function with the result stream
-    # await model.save_to_video(example.video_out_path, total_frames=max_frames)
-    await speed_test_with_timing(model.result_stream())
+    await model.save_to_video(example.video_out_path, total_frames=max_frames)
+    # await speed_test_with_timing(model.result_stream())
 
 
 async def main():
