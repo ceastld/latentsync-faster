@@ -20,23 +20,53 @@ LatentSync 是一个先进的唇形同步（Lip Sync）AI 工具，能够将输�
 source setup_env.sh
 ```
 
-### 文档
+### Docker 使用
 
-- 详细的 Docker 部署说明请参考： [Docker 部署指南](doc/docker.md)
-- 并行推理方法请查看： [使用指南](doc/usage.md)
+#### 方式一：使用 Docker Compose（推荐）
 
-## 📦 模型资源
+```bash
+# 构建并启动服务
+docker-compose up --build
 
-### 人脸检测相关模型
+# 后台运行
+docker-compose up -d --build
 
-本项目使用以下人脸检测模型：
+# 停止服务
+docker-compose down
+```
 
-- **人脸检测模型**: [version-RFB-320.onnx](https://github.com/cunjian/pytorch_face_landmark/raw/master/models/onnx/version-RFB-320.onnx)
-- **人脸关键点检测模型**: [landmark_detection_56_se_external.onnx](https://github.com/cunjian/pytorch_face_landmark/raw/master/onnx/landmark_detection_56_se_external.onnx)
+#### 方式二：使用 Docker 命令
 
-模型来源: [cunjian/pytorch_face_landmark](https://github.com/cunjian/pytorch_face_landmark)
+```bash
+# 构建镜像
+docker build -t latentsync .
 
-### 模型库
+# 运行容器
+docker run -it --gpus all -p 7860:7860 latentsync
 
-- **PyTorch Docker 镜像**: [pytorch/pytorch Tags](https://hub.docker.com/r/pytorch/pytorch/tags)
-- **HuggingFace 模型**: [Pinch-Research/latentsync](https://huggingface.co/Pinch-Research/latentsync)
+# 后台运行
+docker run -d --gpus all -p 7860:7860 --name latentsync-container latentsync
+```
+
+#### Docker 环境说明
+
+- **GPU 支持**：容器支持 NVIDIA GPU 加速，需要安装 nvidia-docker2
+- **端口映射**：默认映射 7860 端口到主机
+- **数据持久化**：可以通过挂载卷来持久化模型和输出文件
+- **环境变量**：支持通过环境变量配置 CUDA 设备等参数
+
+#### 高级用法
+
+```bash
+# 挂载本地目录到容器
+docker run -it --gpus all -p 7860:7860 \
+  -v /path/to/your/models:/app/models \
+  -v /path/to/your/output:/app/output \
+  latentsync
+
+# 指定 CUDA 设备
+docker run -it --gpus '"device=0"' -p 7860:7860 latentsync
+```
+
+
+

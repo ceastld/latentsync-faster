@@ -29,3 +29,4 @@ python-dotenv
 requests
 numba
 GPUtil
+gradio==4.44.0
