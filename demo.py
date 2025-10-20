@@ -1,15 +1,26 @@
 import os
+import asyncio
 import gradio as gr
 import numpy as np
 import soundfile as sf
 import subprocess
 import tempfile
-from latentsync.inference.context import LipsyncContext
-from latentsync.inference.utils import create_pipeline
+import torch
+import logging
+from latentsync import LatentSync, GLOBAL_CONFIG
+from latentsync.inference.utils import load_audio_clips
 
-# Initialize the lip sync context and pipeline
-context = LipsyncContext()
-pipeline = create_pipeline(context)
+# Fix ONNX Runtime thread affinity issues in Slurm environment
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["ONNX_NUM_THREADS"] = "1"
+os.environ["OMP_WAIT_POLICY"] = "PASSIVE"
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format="[%(asctime)s.%(msecs)03d][%(levelname)s][%(name)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+logger = logging.getLogger(__name__)
+
+# Global model instance
+model = None
 
 def convert_video_to_25fps(input_video_path: str, output_video_path: str) -> str:
     """
@@ -32,9 +43,22 @@ def convert_video_to_25fps(input_video_path: str, output_video_path: str) -> str
     except Exception as e:
         raise gr.Error(f"视频转换出错: {str(e)}")
 
+async def initialize_model():
+    """Initialize the LatentSync model"""
+    global model
+    if model is None:
+        try:
+            model = LatentSync(enable_progress=True, vae_type="kl", use_vad=True)
+            await model.model_warmup()
+            logger.info("Model initialized successfully")
+        except Exception as e:
+            logger.error(f"Model initialization failed: {e}")
+            raise gr.Error(f"模型初始化失败: {str(e)}")
+    return model
+
 def process_video(video_path, audio_input, seed=1247):
     """
-    Process the video and audio files to create lip-synced video
+    Process the video and audio files to create lip-synced video using LatentSync
     """
     # Create output directory if it doesn't exist
     os.makedirs("output", exist_ok=True)
@@ -61,17 +85,12 @@ def process_video(video_path, audio_input, seed=1247):
         audio_path = audio_input
     
     # Generate output path
-    audio_name = "input_audio"  # Use a fixed name since we're handling numpy array
+    audio_name = "input_audio"
     output_path = f"output/{video_name}_{audio_name}_synced.mp4"
     
     try:
-        # Run the pipeline with the 25fps video
-        pipeline(
-            video_path=temp_video_path,  # Use the converted 25fps video
-            audio_path=audio_path,
-            video_out_path=output_path,
-        )
-        return output_path
+        # Run the processing using asyncio
+        return asyncio.run(process_video_async(temp_video_path, audio_path, output_path))
     except Exception as e:
         raise gr.Error(f"处理失败: {str(e)}")
     finally:
@@ -87,6 +106,28 @@ def process_video(video_path, audio_input, seed=1247):
                 os.remove(temp_video_path)
             except:
                 pass
+
+async def process_video_async(video_path, audio_path, output_path):
+    """Async processing function using LatentSync"""
+    try:
+        # Initialize model if needed
+        model = await initialize_model()
+        
+        # Set random seed
+        torch.manual_seed(1247)
+        
+        # Push video stream to model
+        model.push_video_stream(video_path, audio_path, max_frames=240, max_input_fps=26)
+        
+        # Save to video
+        await model.save_to_video(output_path, total_frames=240)
+        
+        logger.info(f"Processing completed: {output_path}")
+        return output_path
+        
+    except Exception as e:
+        logger.error(f"Async processing failed: {e}")
+        raise gr.Error(f"异步处理失败: {str(e)}")
 
 # Create Gradio interface
 demo = gr.Interface(
@@ -109,4 +150,14 @@ demo = gr.Interface(
 )
 
 if __name__ == "__main__":
-    demo.launch() 
+    # Enable TensorFloat-32 for better performance
+    torch.backends.cuda.matmul.allow_tf32 = True
+    
+    # Launch Gradio interface
+    demo.launch(
+        share=False,
+        server_name="127.0.0.1",
+        server_port=7860,
+        show_error=True,
+        quiet=False
+    ) 
